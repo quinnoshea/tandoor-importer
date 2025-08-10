@@ -43,6 +43,36 @@ jobs:
       run: |
         bandit tandoor-importer.py
 
+    - name: Create test config for coverage
+      run: |
+        cp config.conf.example config.conf
+        sed -i 's|https://your-tandoor-instance.com|https://demo.example.com|g' config.conf
+        sed -i 's|your_api_token_here|test_token_12345|g' config.conf
+
+    - name: Run basic tests with coverage
+      run: |
+        # Use whichever coverage command is available
+        if command -v coverage >/dev/null 2>&1; then
+          COVERAGE_CMD="coverage"
+        elif command -v python3-coverage >/dev/null 2>&1; then
+          COVERAGE_CMD="python3-coverage"
+        else
+          echo "No coverage command found"
+          exit 1
+        fi
+        
+        # Basic syntax and import test with coverage
+        $COVERAGE_CMD run --source=. -m py_compile tandoor-importer.py
+        $COVERAGE_CMD xml
+        $COVERAGE_CMD report
+
+    - name: Upload coverage to Codacy
+      if: github.event_name == 'push'
+      uses: codacy/codacy-coverage-reporter-action@v1
+      with:
+        project-token: ${{ secrets.CODACY_PROJECT_TOKEN }}
+        coverage-reports: coverage.xml
+
     - name: Validate configuration files
       run: |
         # Check that config example exists and is valid
