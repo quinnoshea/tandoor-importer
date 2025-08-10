@@ -1,3 +1,7 @@
+![Python](https://img.shields.io/badge/python-3.9%2B-3498DB)
+![Status](https://img.shields.io/badge/status-active-success)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/0a51a6fa4d2f44d5aaa178054b2d30b9)](https://app.codacy.com/gh/quinnoshea/tandoor-importer/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
+
 # Tandoor Recipe Bulk Importer
 
 A Python script to bulk import recipes from a list of URLs into your [Tandoor Recipes](https://github.com/TandoorRecipes/recipes) instance.
