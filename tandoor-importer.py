@@ -276,7 +276,7 @@ class FinalBulkImporter:
                 return "failed_scrape"
 
         recipe_data = scrape_result
-        recipe_name = recipe_data.get('name', 'Unknown')
+        recipe_name = recipe_data.get('name', 'Unknown') if isinstance(recipe_data, dict) else 'Unknown'
 
         # Step 2: Create
         create_success, create_result, recipe_id = self.create_recipe(recipe_data, images)
