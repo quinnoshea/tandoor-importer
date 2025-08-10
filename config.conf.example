@@ -1,0 +1,17 @@
+# Tandoor Recipe Importer Configuration
+# Copy this file to 'config.conf' and fill in your values
+
+[tandoor]
+# Your Tandoor server URL (without trailing slash)
+# Example: https://recipes.example.com
+url = https://your-tandoor-instance.com
+
+# Your Tandoor API token (found in Tandoor settings)
+# Go to Settings → API in your Tandoor instance to generate/find your token
+api_token = your_api_token_here
+
+[import]
+# Delay between recipe imports (in seconds)
+# Recommended: 30 seconds to avoid rate limiting
+# Increase if you experience rate limit issues
+delay_between_requests = 30

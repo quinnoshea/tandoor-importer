@@ -50,7 +50,12 @@ A Python script to bulk import recipes from a list of URLs into your [Tandoor Re
 
 ## Configuration
 
-1. Copy the `config.conf` file and update it with your settings:
+1. Copy the example configuration file and update it with your settings:
+   ```bash
+   cp config.conf.example config.conf
+   ```
+
+2. Edit `config.conf` with your settings:
    ```ini
    [tandoor]
    # Your Tandoor server URL (without trailing slash)
@@ -64,7 +69,7 @@ A Python script to bulk import recipes from a list of URLs into your [Tandoor Re
    delay_between_requests = 30
    ```
 
-2. To get your API token:
+3. To get your API token:
    - Log into your Tandoor instance
    - Go to Settings → API
    - Generate or copy your existing API token
@@ -181,4 +186,4 @@ The script provides detailed console output including:
 
 ## License
 
-This project is provided as-is for educational and personal use.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
