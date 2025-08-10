@@ -18,7 +18,7 @@ from requests.exceptions import (
 )
 
 
-class FinalBulkImporter:
+class BulkImporter:
     """
     Main importer class for bulk importing recipes into Tandoor.
     

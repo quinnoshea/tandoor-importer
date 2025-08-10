@@ -15,7 +15,7 @@ import logging
 from pathlib import Path
 
 from config import load_config
-from importer import FinalBulkImporter
+from importer import BulkImporter
 from file_processor import process_url_file
 from exceptions import (
     ConfigurationError,
@@ -83,7 +83,7 @@ def main() -> None:
             sys.exit(1)
     
     try:
-        importer = FinalBulkImporter(tandoor_url, api_token, delay, output_file)
+        importer = BulkImporter(tandoor_url, api_token, delay, output_file)
         
         importer.log_output("🔧 TANDOOR BULK RECIPE IMPORTER")
         importer.log_output("Using corrected two-step import process")

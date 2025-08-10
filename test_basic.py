@@ -8,6 +8,7 @@ import os
 import tempfile
 import configparser
 import json
+import requests
 from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 from io import StringIO
@@ -17,9 +18,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 # Import after setting up path
 import tandoor_importer
-from tandoor_importer import (
-    load_config, FinalBulkImporter, ConfigurationError, NetworkError,
-    RecipeProcessingError, FileOperationError
+from config import load_config
+from importer import BulkImporter
+from file_processor import process_url_file
+from exceptions import (
+    ConfigurationError, NetworkError, RecipeProcessingError, FileOperationError, TandoorImporterError
 )
 
 class TestConfigLoader:
@@ -98,11 +101,11 @@ delay_between_requests = 30
         print("✅ Placeholder values test passed")
 
 class TestImporter:
-    """Test FinalBulkImporter functionality"""
+    """Test BulkImporter functionality"""
     
     def setup_importer(self):
         """Create a test importer instance"""
-        return FinalBulkImporter("https://test.com", "token123", 30)  # nosec B105
+        return BulkImporter("https://test.com", "token123", 30)  # nosec B105
     
     def test_initialization(self):
         """Test importer initialization"""
@@ -118,7 +121,7 @@ class TestImporter:
     def test_initialization_with_output_file(self):
         """Test importer initialization with output file"""
         output_file = StringIO()
-        importer = FinalBulkImporter("https://test.com", "token123", 30, output_file)  # nosec B105
+        importer = BulkImporter("https://test.com", "token123", 30, output_file)  # nosec B105
         assert importer.output_file == output_file
         print("✅ Importer with output file test passed")
     
@@ -133,7 +136,7 @@ class TestImporter:
     def test_log_output_with_file(self):
         """Test log output to both console and file"""
         output_file = StringIO()
-        importer = FinalBulkImporter("https://test.com", "token123", 30, output_file)  # nosec B105
+        importer = BulkImporter("https://test.com", "token123", 30, output_file)  # nosec B105
         
         with patch('builtins.print') as mock_print:
             importer.log_output("test message")
@@ -145,7 +148,7 @@ class TestURLValidation:
     """Test URL validation logic"""
     
     def setup_importer(self):
-        return FinalBulkImporter("https://test.com", "token", 30)  # nosec B105
+        return BulkImporter("https://test.com", "token", 30)  # nosec B105
     
     def test_valid_recipe_urls(self):
         """Test valid recipe URL detection"""
@@ -207,7 +210,7 @@ class TestFileOperations:
     """Test file operation functionality"""
     
     def setup_importer(self):
-        return FinalBulkImporter("https://test.com", "token", 30)  # nosec B105
+        return BulkImporter("https://test.com", "token", 30)  # nosec B105
     
     def test_file_reading_success(self):
         """Test successful file reading"""
@@ -226,7 +229,7 @@ class TestFileOperations:
                  patch.object(importer, 'log_output'):
                 
                 # This should not raise an exception
-                importer.import_from_file("test.txt")
+                process_url_file(importer, "test.txt")
         
         print("✅ File reading success test passed")
     
@@ -236,7 +239,7 @@ class TestFileOperations:
         
         with patch('pathlib.Path.exists', return_value=False):
             try:
-                importer.import_from_file("nonexistent.txt")
+                process_url_file(importer, "nonexistent.txt")
                 assert False, "Should have raised FileOperationError"
             except FileOperationError as e:
                 assert "URL file not found" in str(e)
@@ -254,7 +257,7 @@ class TestFileOperations:
             mock_stat.return_value.st_size = 200 * 1024 * 1024  # 200MB
             
             try:
-                importer.import_from_file("large.txt")
+                process_url_file(importer, "large.txt")
                 assert False, "Should have raised FileOperationError"
             except FileOperationError as e:
                 assert "File too large" in str(e)
@@ -265,7 +268,7 @@ class TestNetworkOperations:
     """Test network operation functionality"""
     
     def setup_importer(self):
-        return FinalBulkImporter("https://test.com", "token", 30)  # nosec B105
+        return BulkImporter("https://test.com", "token", 30)  # nosec B105
     
     def test_network_retry_logic(self):
         """Test network retry with exponential backoff"""
@@ -282,7 +285,7 @@ class TestNetworkOperations:
             
             # First call fails, second succeeds
             mock_get.side_effect = [
-                tandoor_importer.ConnectionError("Connection failed"),
+                requests.ConnectionError("Connection failed"),
                 mock_response
             ]
             
@@ -306,7 +309,7 @@ class TestNetworkOperations:
         with patch('requests.Session.get', return_value=mock_response) as mock_get, \
              patch.object(importer, 'log_output'):
             
-            mock_get.return_value.raise_for_status.side_effect = tandoor_importer.HTTPError(response=mock_response)
+            mock_get.return_value.raise_for_status.side_effect = requests.HTTPError(response=mock_response)
             
             try:
                 importer.get_existing_source_urls()
@@ -321,10 +324,10 @@ class TestExceptionHandling:
     
     def test_exception_inheritance(self):
         """Test custom exception inheritance"""
-        assert issubclass(ConfigurationError, tandoor_importer.TandoorImporterError)
-        assert issubclass(NetworkError, tandoor_importer.TandoorImporterError)
-        assert issubclass(RecipeProcessingError, tandoor_importer.TandoorImporterError)
-        assert issubclass(FileOperationError, tandoor_importer.TandoorImporterError)
+        assert issubclass(ConfigurationError, TandoorImporterError)
+        assert issubclass(NetworkError, TandoorImporterError)
+        assert issubclass(RecipeProcessingError, TandoorImporterError)
+        assert issubclass(FileOperationError, TandoorImporterError)
         print("✅ Exception inheritance test passed")
     
     def test_exception_messages(self):

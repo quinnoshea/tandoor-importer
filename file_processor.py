@@ -8,11 +8,11 @@ from typing import Optional
 from pathlib import Path
 
 from exceptions import FileOperationError
-from importer import FinalBulkImporter
+from importer import BulkImporter
 
 
 def process_url_file(
-    importer: FinalBulkImporter, 
+    importer: BulkImporter, 
     filename: str, 
     start_from: int = 0, 
     max_imports: Optional[int] = None
@@ -130,7 +130,7 @@ def process_url_file(
     _print_final_report(importer, new_urls)
 
 
-def _print_final_report(importer: FinalBulkImporter, new_urls: list) -> None:
+def _print_final_report(importer: BulkImporter, new_urls: list) -> None:
     """Print comprehensive final report of import results."""
     importer.log_output("\n🎉 BULK IMPORT COMPLETE!")
     importer.log_output("📊 Final Stats:")
