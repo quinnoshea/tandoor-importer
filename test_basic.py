@@ -41,7 +41,7 @@ delay_between_requests = 30
             
             url, token, delay = load_config()
             assert url == "https://demo.example.com"
-            assert token == "test_token_12345"
+            assert token == "test_token_12345"  # nosec B105
             assert delay == 30
         print("✅ Valid config test passed")
     
@@ -102,13 +102,13 @@ class TestImporter:
     
     def setup_importer(self):
         """Create a test importer instance"""
-        return FinalBulkImporter("https://test.com", "token123", 30)
+        return FinalBulkImporter("https://test.com", "token123", 30)  # nosec B105
     
     def test_initialization(self):
         """Test importer initialization"""
         importer = self.setup_importer()
         assert importer.tandoor_url == "https://test.com"
-        assert importer.api_token == "token123"
+        assert importer.api_token == "token123"  # nosec B105
         assert importer.delay == 30
         assert importer.output_file is None
         assert 'total' in importer.stats
@@ -118,7 +118,7 @@ class TestImporter:
     def test_initialization_with_output_file(self):
         """Test importer initialization with output file"""
         output_file = StringIO()
-        importer = FinalBulkImporter("https://test.com", "token123", 30, output_file)
+        importer = FinalBulkImporter("https://test.com", "token123", 30, output_file)  # nosec B105
         assert importer.output_file == output_file
         print("✅ Importer with output file test passed")
     
@@ -133,7 +133,7 @@ class TestImporter:
     def test_log_output_with_file(self):
         """Test log output to both console and file"""
         output_file = StringIO()
-        importer = FinalBulkImporter("https://test.com", "token123", 30, output_file)
+        importer = FinalBulkImporter("https://test.com", "token123", 30, output_file)  # nosec B105
         
         with patch('builtins.print') as mock_print:
             importer.log_output("test message")
@@ -145,7 +145,7 @@ class TestURLValidation:
     """Test URL validation logic"""
     
     def setup_importer(self):
-        return FinalBulkImporter("https://test.com", "token", 30)
+        return FinalBulkImporter("https://test.com", "token", 30)  # nosec B105
     
     def test_valid_recipe_urls(self):
         """Test valid recipe URL detection"""
@@ -207,7 +207,7 @@ class TestFileOperations:
     """Test file operation functionality"""
     
     def setup_importer(self):
-        return FinalBulkImporter("https://test.com", "token", 30)
+        return FinalBulkImporter("https://test.com", "token", 30)  # nosec B105
     
     def test_file_reading_success(self):
         """Test successful file reading"""
@@ -265,7 +265,7 @@ class TestNetworkOperations:
     """Test network operation functionality"""
     
     def setup_importer(self):
-        return FinalBulkImporter("https://test.com", "token", 30)
+        return FinalBulkImporter("https://test.com", "token", 30)  # nosec B105
     
     def test_network_retry_logic(self):
         """Test network retry with exponential backoff"""
