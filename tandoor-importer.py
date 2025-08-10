@@ -65,6 +65,15 @@ class FinalBulkImporter:
             'connection_errors': 0
         }
         
+        # Track failed URLs with reasons
+        self.failed_urls = {
+            'failed_scrape': [],
+            'failed_create': [],
+            'non_recipe_urls': [],
+            'connection_errors': [],
+            'invalid_urls': []
+        }
+        
     def is_valid_recipe_url(self, url):
         """Validate if URL could potentially contain a recipe"""
         if not url or not isinstance(url, str):
@@ -254,14 +263,17 @@ class FinalBulkImporter:
                 return "duplicate"
             elif "non_recipe:" in scrape_result:
                 self.stats['non_recipe_urls'] += 1
+                self.failed_urls['non_recipe_urls'].append((url, scrape_result))
                 print(f"🚫 Non-recipe URL: {scrape_result}")
                 return "non_recipe"
             elif "connection:" in scrape_result:
                 self.stats['connection_errors'] += 1
+                self.failed_urls['connection_errors'].append((url, scrape_result))
                 print(f"🌐 Connection error: {scrape_result}")
                 return "connection_error"
             else:
                 self.stats['failed_scrape'] += 1
+                self.failed_urls['failed_scrape'].append((url, scrape_result))
                 print(f"❌ Scrape failed: {scrape_result}")
                 return "failed_scrape"
         
@@ -277,6 +289,7 @@ class FinalBulkImporter:
                 return "rate_limited"
             else:
                 self.stats['failed_create'] += 1
+                self.failed_urls['failed_create'].append((url, create_result))
                 print(f"❌ Create failed: {create_result}")
                 return "failed_create"
         
@@ -325,6 +338,7 @@ class FinalBulkImporter:
                 valid_urls.append(url)
             else:
                 self.stats['invalid_urls'] += 1
+                self.failed_urls['invalid_urls'].append(url)
                 print(f"🚫 Skipping invalid/non-recipe URL: {url[:60]}{'...' if len(url) > 60 else ''}")
         
         print(f"📊 Found {len(valid_urls)} valid URLs ({self.stats['invalid_urls']} invalid)")
@@ -402,6 +416,41 @@ class FinalBulkImporter:
         
         success_rate = (self.stats['successful'] / max(1, len(new_urls))) * 100
         print(f"   📈 Success rate: {success_rate:.1f}%")
+        
+        # Display failed URLs if any
+        total_failures = (self.stats['failed_scrape'] + self.stats['failed_create'] + 
+                         self.stats['non_recipe_urls'] + self.stats['connection_errors'] + 
+                         self.stats['invalid_urls'])
+        
+        if total_failures > 0:
+            print(f"\n❌ FAILED URLS ({total_failures} total):")
+            
+            if self.failed_urls['invalid_urls']:
+                print(f"\n🚫 Invalid URLs ({len(self.failed_urls['invalid_urls'])}):")
+                for url in self.failed_urls['invalid_urls']:
+                    print(f"   {url}")
+            
+            if self.failed_urls['non_recipe_urls']:
+                print(f"\n🚫 Non-recipe URLs ({len(self.failed_urls['non_recipe_urls'])}):")
+                for url, reason in self.failed_urls['non_recipe_urls']:
+                    print(f"   {url} - {reason}")
+            
+            if self.failed_urls['connection_errors']:
+                print(f"\n🌐 Connection errors ({len(self.failed_urls['connection_errors'])}):")
+                for url, reason in self.failed_urls['connection_errors']:
+                    print(f"   {url} - {reason}")
+            
+            if self.failed_urls['failed_scrape']:
+                print(f"\n❌ Failed scraping ({len(self.failed_urls['failed_scrape'])}):")
+                for url, reason in self.failed_urls['failed_scrape']:
+                    print(f"   {url} - {reason}")
+            
+            if self.failed_urls['failed_create']:
+                print(f"\n❌ Failed creation ({len(self.failed_urls['failed_create'])}):")
+                for url, reason in self.failed_urls['failed_create']:
+                    print(f"   {url} - {reason}")
+        else:
+            print("\n✅ No failed URLs!")
 
 
 def main():
