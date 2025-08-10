@@ -1,6 +1,9 @@
+[![License](https://img.shields.io/badge/license-MIT-9B59B6.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.9%2B-3498DB)
-![Status](https://img.shields.io/badge/status-active-success)
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/0a51a6fa4d2f44d5aaa178054b2d30b9)](https://app.codacy.com/gh/quinnoshea/tandoor-importer/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
+[![Codacy Badge](https://app.codacy.com/project/badge/Coverage/0a51a6fa4d2f44d5aaa178054b2d30b9)](https://app.codacy.com/gh/quinnoshea/tandoor-importer/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage)
+![Status](https://img.shields.io/badge/status-active-success)
+[![CI](https://github.com/quinnoshea/tandoor-importer/actions/workflows/ci-workflow.yml/badge.svg)](https://github.com/quinnoshea/tandoor-importer/actions/workflows/ci-workflow.yml)
 
 # Tandoor Recipe Bulk Importer
 
