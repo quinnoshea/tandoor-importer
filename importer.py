@@ -268,14 +268,11 @@ class BulkImporter:
         images: Optional[list] = None
     ) -> Tuple[bool, Union[dict, str], Optional[int]]:
         """Step 2: Create recipe in database"""
-        # Select first image if available
-        if images:
-            recipe_data['image_url'] = images[0]
-
         create_url = f"{self.tandoor_url}/api/recipe/"
         headers = {'Content-Type': 'application/json'}
 
         try:
+            # Create recipe first without image
             response = self.session.post(create_url, json=recipe_data, headers=headers, timeout=30)
 
             if response.status_code == 429:
@@ -284,12 +281,43 @@ class BulkImporter:
             if response.status_code == 201:  # Created successfully
                 created_recipe = response.json()
                 recipe_id = created_recipe.get('id')
+                
+                # Now add image if available using separate endpoint
+                if images and recipe_id:
+                    image_success = self._upload_recipe_image(recipe_id, images[0])
+                    if not image_success:
+                        self.log_output(f"   ⚠️ Recipe created successfully but image upload failed")
+                
                 return True, created_recipe, recipe_id
             else:
                 return False, f"http_{response.status_code}: {response.text[:100]}", None
 
         except Exception as e:
             return False, f"exception: {e}", None
+
+    def _upload_recipe_image(self, recipe_id: int, image_url: str) -> bool:
+        """Upload image to recipe using Tandoor's image endpoint"""
+        try:
+            image_endpoint = f"{self.tandoor_url}/api/recipe/{recipe_id}/image/"
+            image_data = {'image_url': image_url}
+            
+            response = self.session.put(
+                image_endpoint, 
+                json=image_data, 
+                headers={'Content-Type': 'application/json'},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                self.log_output(f"   📸 Image uploaded successfully from {image_url[:60]}{'...' if len(image_url) > 60 else ''}")
+                return True
+            else:
+                self.log_output(f"   ⚠️ Image upload failed ({response.status_code}): {image_url[:60]}{'...' if len(image_url) > 60 else ''}")
+                return False
+                
+        except Exception as e:
+            self.log_output(f"   ⚠️ Image upload error: {e}")
+            return False
 
     def import_single_recipe(self, url: str, index: int, total: int) -> str:
         """Complete import process for a single recipe"""

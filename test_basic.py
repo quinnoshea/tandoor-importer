@@ -318,6 +318,40 @@ class TestNetworkOperations:
                 assert "Authentication failed" in str(e)
         
         print("✅ Authentication error test passed")
+    
+    def test_image_upload_functionality(self):
+        """Test recipe image upload functionality"""
+        importer = self.setup_importer()
+        
+        # Mock successful recipe creation
+        mock_create_response = MagicMock()
+        mock_create_response.status_code = 201
+        mock_create_response.json.return_value = {'id': 123, 'name': 'Test Recipe'}
+        
+        # Mock successful image upload  
+        mock_image_response = MagicMock()
+        mock_image_response.status_code = 200
+        
+        with patch('requests.Session.post', return_value=mock_create_response) as mock_post, \
+             patch('requests.Session.put', return_value=mock_image_response) as mock_put, \
+             patch.object(importer, 'log_output'):
+            
+            recipe_data = {'name': 'Test Recipe', 'description': 'Test'}
+            images = ['https://example.com/image.jpg']
+            
+            success, result, recipe_id = importer.create_recipe(recipe_data, images)
+            
+            # Verify recipe was created successfully
+            assert success is True
+            assert recipe_id == 123
+            
+            # Verify image upload was attempted
+            mock_put.assert_called_once()
+            call_args = mock_put.call_args
+            assert 'image/' in call_args[0][0]  # URL contains 'image/'
+            assert call_args[1]['json'] == {'image_url': 'https://example.com/image.jpg'}
+            
+        print("✅ Image upload functionality test passed")
 
 class TestExceptionHandling:
     """Test custom exception handling"""
@@ -384,6 +418,7 @@ def run_all_tests():
     network_tests = TestNetworkOperations()
     network_tests.test_network_retry_logic()
     network_tests.test_authentication_error()
+    network_tests.test_image_upload_functionality()
     
     # Exception handling tests
     print("\n🚨 Testing Exception Handling:")
