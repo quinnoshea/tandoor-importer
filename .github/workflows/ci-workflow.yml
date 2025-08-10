@@ -33,15 +33,15 @@ jobs:
 
     - name: Run syntax check
       run: |
-        python -m py_compile tandoor-importer.py
+        python -m py_compile tandoor_importer.py
 
     - name: Run linting with ruff
       run: |
-        ruff check tandoor-importer.py
+        ruff check tandoor_importer.py
 
     - name: Run security check with bandit
       run: |
-        bandit tandoor-importer.py
+        bandit tandoor_importer.py
 
     - name: Create test config for coverage
       run: |
@@ -51,8 +51,7 @@ jobs:
 
     - name: Run basic tests with coverage
       run: |
-        # Rename script to make it importable (Python module naming)
-        cp tandoor-importer.py tandoor_importer.py
+        # Script already uses proper Python module naming
         
         # Use whichever coverage command is available
         if command -v coverage >/dev/null 2>&1; then

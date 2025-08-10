@@ -98,19 +98,19 @@ https://www.kingarthurbaking.com/recipes/bread-recipe
 
 Basic usage:
 ```bash
-python3 tandoor-importer.py url-list.txt
+python3 tandoor_importer.py url-list.txt
 ```
 
 Advanced usage with options:
 ```bash
 # Start from a specific line (0-indexed)
-python3 tandoor-importer.py url-list.txt 100
+python3 tandoor_importer.py url-list.txt 100
 
 # Limit number of imports
-python3 tandoor-importer.py url-list.txt 0 50
+python3 tandoor_importer.py url-list.txt 0 50
 
 # Start from line 100 and import max 25 recipes
-python3 tandoor-importer.py url-list.txt 100 25
+python3 tandoor_importer.py url-list.txt 100 25
 ```
 
 ### Arguments
