@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-Final corrected bulk import script using the proper two-step process
+Tandoor Recipe Bulk Importer
+
+A tool for bulk importing recipes into Tandoor Recipes.
+Features error handling, retry logic, and logging capabilities.
+
+Written with respect to established engineering principles and standards.
+Strives to follow PEP-8, PEP-20 (Zen of Python), and PEP-484 (Type Hints).
 """
 
 import requests
@@ -9,7 +15,7 @@ import sys
 import configparser
 import argparse
 import logging
-from typing import Optional, TextIO, Tuple
+from typing import Optional, TextIO, Tuple, Union
 from pathlib import Path
 from requests.exceptions import (
     RequestException, 
@@ -96,7 +102,10 @@ def load_config() -> Tuple[str, str, int]:
 
         # Validate URL format
         if not tandoor_url.startswith(('http://', 'https://')):
-            raise ConfigurationError(f"Invalid Tandoor URL format: {tandoor_url}. Must start with http:// or https://")
+            raise ConfigurationError(
+                f"Invalid Tandoor URL format: {tandoor_url}. "
+                "Must start with http:// or https://"
+            )
 
         return tandoor_url, api_token, delay
 
@@ -137,7 +146,7 @@ class FinalBulkImporter:
             'invalid_urls': []
         }
 
-    def is_valid_recipe_url(self, url):
+    def is_valid_recipe_url(self, url) -> bool:
         """Validate if URL could potentially contain a recipe"""
         if not url or not isinstance(url, str):
             return False
@@ -244,7 +253,10 @@ class FinalBulkImporter:
                             raise NetworkError(f"Server error after {max_retries} retries: {e}")
                         
                         wait_time = base_delay * (2 ** (retry_count - 1))
-                        self.log_output(f"🔄 Server error (retry {retry_count}/{max_retries}), waiting {wait_time}s: {e}")
+                        self.log_output(
+                            f"🔄 Server error (retry {retry_count}/{max_retries}), "
+                            f"waiting {wait_time}s: {e}"
+                        )
                         time.sleep(wait_time)
                     else:
                         raise NetworkError(f"HTTP error fetching existing recipes: {e}")
@@ -283,7 +295,7 @@ class FinalBulkImporter:
         self.log_output(f"📊 Found {len(existing_urls)} existing recipes with source URLs")
         return existing_urls
 
-    def scrape_recipe(self, url):
+    def scrape_recipe(self, url: str) -> Tuple[bool, Union[str, dict], Optional[list], None]:
         """Step 1: Scrape recipe data from URL"""
         scrape_url = f"{self.tandoor_url}/api/recipe-from-source/"
         headers = {'Content-Type': 'application/json'}
@@ -327,7 +339,11 @@ class FinalBulkImporter:
         except Exception as e:
             return False, f"exception: {e}", None, None
 
-    def create_recipe(self, recipe_data, images=None):
+    def create_recipe(
+        self, 
+        recipe_data: dict, 
+        images: Optional[list] = None
+    ) -> Tuple[bool, Union[dict, str], Optional[int]]:
         """Step 2: Create recipe in database"""
         # Select first image if available
         if images:
@@ -352,7 +368,7 @@ class FinalBulkImporter:
         except Exception as e:
             return False, f"exception: {e}", None
 
-    def import_single_recipe(self, url, index, total):
+    def import_single_recipe(self, url: str, index: int, total: int) -> str:
         """Complete import process for a single recipe"""
         self.log_output(f"\n📝 [{index}/{total}] Importing: {url}")
 
@@ -383,8 +399,15 @@ class FinalBulkImporter:
                 self.log_output(f"❌ Scrape failed: {scrape_result}")
                 return "failed_scrape"
 
+        # At this point, scrape_success is True, so scrape_result must be a dict
+        if not isinstance(scrape_result, dict):
+            # This should never happen given our logic, but satisfies type checker
+            self.stats['failed_scrape'] += 1
+            self.log_output("❌ Unexpected non-dict result from successful scrape")
+            return "failed_scrape"
+            
         recipe_data = scrape_result
-        recipe_name = recipe_data.get('name', 'Unknown') if isinstance(recipe_data, dict) else 'Unknown'
+        recipe_name = recipe_data.get('name', 'Unknown')
 
         # Step 2: Create
         create_success, create_result, recipe_id = self.create_recipe(recipe_data, images)
@@ -403,7 +426,7 @@ class FinalBulkImporter:
         self.log_output(f"✅ SUCCESS: '{recipe_name}' (ID: {recipe_id})")
         return "success"
 
-    def wait_for_rate_limit_reset(self):
+    def wait_for_rate_limit_reset(self) -> bool:
         """Wait for rate limit to reset"""
         self.log_output("⏳ Waiting for rate limit to reset...")
 
@@ -528,7 +551,11 @@ class FinalBulkImporter:
 
             # Print progress
             success_rate = (self.stats['successful'] / i) * 100 if i > 0 else 0
-            self.log_output(f"📊 Progress: {i}/{len(new_urls)} ({i/len(new_urls)*100:.1f}%) | Success rate: {success_rate:.1f}%")
+            progress_pct = i/len(new_urls)*100
+            self.log_output(
+                f"📊 Progress: {i}/{len(new_urls)} ({progress_pct:.1f}%) | "
+                f"Success rate: {success_rate:.1f}%"
+            )
             self.log_output(f"📈 Stats: ✅{self.stats['successful']} ⚠️{self.stats['duplicates']} "
                   f"🚫{self.stats['non_recipe_urls']} 🌐{self.stats['connection_errors']} "
                   f"❌{self.stats['failed_scrape']+self.stats['failed_create']} ⏳{self.stats['rate_limited']}")
@@ -555,9 +582,9 @@ class FinalBulkImporter:
         self.log_output(f"   📈 Success rate: {success_rate:.1f}%")
 
         # Display failed URLs if any
-        total_failures = (self.stats['failed_scrape'] + self.stats['failed_create'] +
-                         self.stats['non_recipe_urls'] + self.stats['connection_errors'] +
-                         self.stats['invalid_urls'])
+        failure_types = ['failed_scrape', 'failed_create', 'non_recipe_urls', 
+                        'connection_errors', 'invalid_urls']
+        total_failures = sum(self.stats[failure_type] for failure_type in failure_types)
 
         if total_failures > 0:
             self.log_output(f"\n❌ FAILED URLS ({total_failures} total):")
