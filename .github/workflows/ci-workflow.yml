@@ -51,6 +51,9 @@ jobs:
 
     - name: Run basic tests with coverage
       run: |
+        # Rename script to make it importable (Python module naming)
+        cp tandoor-importer.py tandoor_importer.py
+        
         # Use whichever coverage command is available
         if command -v coverage >/dev/null 2>&1; then
           COVERAGE_CMD="coverage"
@@ -61,8 +64,8 @@ jobs:
           exit 1
         fi
         
-        # Basic syntax and import test with coverage
-        $COVERAGE_CMD run --source=. -m py_compile tandoor-importer.py
+        # Run actual tests that execute the code
+        $COVERAGE_CMD run --source=. test_basic.py
         $COVERAGE_CMD xml
         $COVERAGE_CMD report
 
