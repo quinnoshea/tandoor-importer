@@ -1,0 +1,20 @@
+---
+# Global ignores (generated artefacts, tests, images, …)
+exclude_paths:
+  - ".github/**"
+  - "**/__pycache__/**"
+
+# Per-tool tuning
+tools:
+  - name: ruff                # super-fast flake8 replacement
+    configuration:
+      extend-select: ["F", "E", "B", "I", "C4", "SIM", "T"]
+      line-length: 120
+  - name: bandit              # security scanner
+    configuration:
+      severity: HIGH
+      confidence: HIGH
+  - name: mypy
+    configuration:
+      disallow_untyped_defs: true
+      strict_optional: true
