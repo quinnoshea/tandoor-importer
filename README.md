@@ -114,6 +114,7 @@ python3 tandoor-importer.py url-list.txt 100 25
 ## Features & Behavior
 
 ### URL Validation
+
 The script automatically filters out:
 - Image files (.jpg, .png, etc.)
 - Video files (.mp4, .mov, etc.)
@@ -122,16 +123,19 @@ The script automatically filters out:
 - Other non-recipe content
 
 ### Duplicate Detection
+
 - Fetches existing recipes from your Tandoor instance
 - Compares source URLs to avoid importing duplicates
 - Shows count of skipped duplicates in progress report
 
 ### Rate Limiting
+
 - Respects Tandoor's rate limits
 - Automatically waits and retries when rate limited
 - Configurable delay between requests (default: 30 seconds)
 
 ### Error Handling
+
 The script handles various error scenarios:
 - Connection timeouts
 - Invalid URLs
@@ -140,6 +144,7 @@ The script handles various error scenarios:
 - Rate limiting
 
 ### Progress Reporting
+
 Real-time statistics showing:
 - Import progress (current/total)
 - Success rate percentage
