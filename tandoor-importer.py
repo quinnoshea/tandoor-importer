@@ -30,7 +30,7 @@ def load_config():
             print("❌ Please configure your Tandoor URL in config.conf")
             sys.exit(1)
 
-        if not api_token or api_token == 'your_api_token_here':
+        if not api_token or api_token == 'your_api_token_here':  # nosec B105
             print("❌ Please configure your API token in config.conf")
             sys.exit(1)
 
