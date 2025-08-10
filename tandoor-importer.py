@@ -4,12 +4,10 @@ Final corrected bulk import script using the proper two-step process
 """
 
 import requests
-import json
 import time
 import sys
 import configparser
 import os
-from datetime import datetime
 
 def load_config():
     """Load configuration from config.conf file"""
@@ -255,7 +253,7 @@ class FinalBulkImporter:
         if not scrape_success:
             if "rate_limited" in scrape_result:
                 self.stats['rate_limited'] += 1
-                print(f"⏳ Rate limited during scrape")
+                print("⏳ Rate limited during scrape")
                 return "rate_limited"
             elif "duplicate" in scrape_result:
                 self.stats['duplicates'] += 1
@@ -285,7 +283,7 @@ class FinalBulkImporter:
         if not create_success:
             if "rate_limited" in create_result:
                 self.stats['rate_limited'] += 1
-                print(f"⏳ Rate limited during creation")
+                print("⏳ Rate limited during creation")
                 return "rate_limited"
             else:
                 self.stats['failed_create'] += 1
@@ -402,8 +400,8 @@ class FinalBulkImporter:
                 time.sleep(self.delay)
 
         # Final report
-        print(f"\n🎉 BULK IMPORT COMPLETE!")
-        print(f"📊 Final Stats:")
+        print("\n🎉 BULK IMPORT COMPLETE!")
+        print("📊 Final Stats:")
         print(f"   Total processed: {self.stats['total']}")
         print(f"   ✅ Successful imports: {self.stats['successful']}")
         print(f"   ⚠️ Duplicates skipped: {self.stats['duplicates']}")
