@@ -218,6 +218,7 @@ coverage html  # Generate HTML coverage report
 ### Test Coverage
 
 The test suite covers:
+
 - **Configuration loading and validation** - File parsing, URL validation, error handling
 - **URL validation logic** - Recipe URL detection, invalid URL filtering
 - **File operations** - Reading, encoding, size limits, permission handling  
@@ -228,6 +229,7 @@ The test suite covers:
 ### Running Tests in CI
 
 Tests are automatically run in GitHub Actions across Python 3.9-3.12 with:
+
 - Syntax validation
 - Code linting (ruff)
 - Security scanning (bandit) 
