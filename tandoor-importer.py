@@ -419,7 +419,7 @@ class FinalBulkImporter:
         
         # Display failed URLs if any
         total_failures = (self.stats['failed_scrape'] + self.stats['failed_create'] + 
-                         self.stats['non_recipe_urls'] + self.stats['connection_errors'] + 
+                         self.stats['non_recipe_urls'] + self.stats['connection_errors'] +
                          self.stats['invalid_urls'])
         
         if total_failures > 0:

@@ -70,6 +70,7 @@ A Python script to bulk import recipes from a list of URLs into your [Tandoor Re
    ```
 
 3. To get your API token:
+
    - Log into your Tandoor instance
    - Go to Settings → API
    - Generate or copy your existing API token
@@ -116,6 +117,7 @@ python3 tandoor-importer.py url-list.txt 100 25
 ### URL Validation
 
 The script automatically filters out:
+
 - Image files (.jpg, .png, etc.)
 - Video files (.mp4, .mov, etc.)
 - Document files (.pdf, .doc, etc.)
@@ -137,6 +139,7 @@ The script automatically filters out:
 ### Error Handling
 
 The script handles various error scenarios:
+
 - Connection timeouts
 - Invalid URLs
 - Non-recipe pages
@@ -146,6 +149,7 @@ The script handles various error scenarios:
 ### Progress Reporting
 
 Real-time statistics showing:
+
 - Import progress (current/total)
 - Success rate percentage
 - Breakdown of results (successful, duplicates, errors, etc.)
@@ -153,6 +157,7 @@ Real-time statistics showing:
 ## Output
 
 The script provides detailed console output including:
+
 - Configuration validation
 - URL filtering results
 - Real-time import progress
