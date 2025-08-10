@@ -205,7 +205,9 @@ class FinalBulkImporter:
         self.log_output("🔍 Fetching existing recipes for duplicate detection...")
 
         while True:
+            response = None
             retry_count = 0
+            
             while retry_count <= max_retries:
                 try:
                     response = self.session.get(
@@ -249,6 +251,10 @@ class FinalBulkImporter:
 
                 except RequestException as e:
                     raise NetworkError(f"Request failed while fetching existing recipes: {e}")
+
+            # Ensure we have a valid response before proceeding
+            if response is None:
+                raise NetworkError("Failed to get valid response after retries")
 
             try:
                 data = response.json()
