@@ -15,7 +15,7 @@ def load_config():
     """Load configuration from config.conf file"""
     config = configparser.ConfigParser()
     config_path = os.path.join(os.path.dirname(__file__), 'config.conf')
-    
+
     if not os.path.exists(config_path):
         print(f"❌ Configuration file not found: {config_path}")
         print("Please copy and configure the config.conf file with your Tandoor settings.")
@@ -92,7 +92,7 @@ class FinalBulkImporter:
         skip_patterns = [
             # Images
             '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp',
-            # Videos  
+            # Videos
             '.mp4', '.mov', '.avi', '.wmv', '.flv', '.webm',
             # Documents
             '.pdf', '.doc', '.docx', '.txt', '.csv',
@@ -418,7 +418,7 @@ class FinalBulkImporter:
         print(f"   📈 Success rate: {success_rate:.1f}%")
         
         # Display failed URLs if any
-        total_failures = (self.stats['failed_scrape'] + self.stats['failed_create'] + 
+        total_failures = (self.stats['failed_scrape'] + self.stats['failed_create'] +
                          self.stats['non_recipe_urls'] + self.stats['connection_errors'] +
                          self.stats['invalid_urls'])
         
