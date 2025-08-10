@@ -62,6 +62,8 @@ coverage.xml
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+test_basic.py
+tandoor_importer.py
 
 # My stuff
 .plan
