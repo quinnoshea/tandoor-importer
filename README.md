@@ -201,6 +201,38 @@ The script provides detailed console output including:
   curl -H "Authorization: Bearer YOUR_TOKEN" https://your-tandoor-instance.com/api/recipe/?page_size=1
   ```
 
+## Testing
+
+The project includes a comprehensive test suite with high code coverage:
+
+```bash
+# Run the test suite
+python test_basic.py
+
+# Run with coverage (if coverage is installed)
+coverage run test_basic.py
+coverage report
+coverage html  # Generate HTML coverage report
+```
+
+### Test Coverage
+
+The test suite covers:
+- **Configuration loading and validation** - File parsing, URL validation, error handling
+- **URL validation logic** - Recipe URL detection, invalid URL filtering
+- **File operations** - Reading, encoding, size limits, permission handling  
+- **Network operations** - Retry logic, authentication, rate limiting
+- **Error handling** - Custom exceptions, graceful failure modes
+- **Logging functionality** - Console and file output
+
+### Running Tests in CI
+
+Tests are automatically run in GitHub Actions across Python 3.9-3.12 with:
+- Syntax validation
+- Code linting (ruff)
+- Security scanning (bandit) 
+- Comprehensive test execution with coverage reporting
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
