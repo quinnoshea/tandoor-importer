@@ -9,39 +9,102 @@ import sys
 import configparser
 import os
 import argparse
-from typing import Optional, TextIO
+import logging
+from typing import Optional, TextIO, Dict, Any, Tuple
+from pathlib import Path
+from requests.exceptions import (
+    RequestException, 
+    Timeout, 
+    ConnectionError, 
+    HTTPError
+)
 
-def load_config():
-    """Load configuration from config.conf file"""
+
+class TandoorImporterError(Exception):
+    """Base exception for Tandoor Importer."""
+    pass
+
+
+class ConfigurationError(TandoorImporterError):
+    """Raised when configuration is invalid or missing."""
+    pass
+
+
+class NetworkError(TandoorImporterError):
+    """Raised when network operations fail."""
+    pass
+
+
+class RecipeProcessingError(TandoorImporterError):
+    """Raised when recipe processing fails."""
+    pass
+
+
+class FileOperationError(TandoorImporterError):
+    """Raised when file operations fail."""
+    pass
+
+def load_config() -> Tuple[str, str, int]:
+    """Load configuration from config.conf file with comprehensive error handling."""
     config = configparser.ConfigParser()
-    config_path = os.path.join(os.path.dirname(__file__), 'config.conf')
-
-    if not os.path.exists(config_path):
-        print(f"❌ Configuration file not found: {config_path}")
-        print("Please copy and configure the config.conf file with your Tandoor settings.")
-        sys.exit(1)
-
-    config.read(config_path)
+    config_path = Path(__file__).parent / 'config.conf'
 
     try:
-        tandoor_url = config.get('tandoor', 'url').rstrip('/')
-        api_token = config.get('tandoor', 'api_token')
-        delay = config.getint('import', 'delay_between_requests')
+        if not config_path.exists():
+            raise ConfigurationError(
+                f"Configuration file not found: {config_path}\n"
+                "Please copy config.conf.example to config.conf and configure it."
+            )
 
+        if not config_path.is_file():
+            raise ConfigurationError(f"Configuration path exists but is not a file: {config_path}")
+
+        # Read configuration with error handling
+        try:
+            config.read(config_path, encoding='utf-8')
+        except (UnicodeDecodeError, configparser.Error) as e:
+            raise ConfigurationError(f"Failed to parse configuration file: {e}")
+
+        # Validate required sections exist
+        required_sections = {'tandoor', 'import'}
+        missing_sections = required_sections - set(config.sections())
+        if missing_sections:
+            raise ConfigurationError(f"Missing required sections in config: {missing_sections}")
+
+        # Extract and validate configuration values
+        try:
+            tandoor_url = config.get('tandoor', 'url', fallback='').strip().rstrip('/')
+            api_token = config.get('tandoor', 'api_token', fallback='').strip()
+            delay = config.getint('import', 'delay_between_requests', fallback=30)
+        except (ValueError, configparser.NoOptionError) as e:
+            raise ConfigurationError(f"Invalid configuration value: {e}")
+
+        # Validate configuration values
         if not tandoor_url or tandoor_url == 'https://your-tandoor-instance.com':
-            print("❌ Please configure your Tandoor URL in config.conf")
-            sys.exit(1)
+            raise ConfigurationError(
+                "Please configure your Tandoor URL in config.conf\n"
+                "Set 'url' under [tandoor] section to your Tandoor instance URL."
+            )
 
         if not api_token or api_token == 'your_api_token_here':  # nosec B105
-            print("❌ Please configure your API token in config.conf")
-            sys.exit(1)
+            raise ConfigurationError(
+                "Please configure your API token in config.conf\n"
+                "Set 'api_token' under [tandoor] section to your Tandoor API token."
+            )
+
+        if delay < 1 or delay > 3600:
+            raise ConfigurationError(f"Invalid delay value: {delay}. Must be between 1 and 3600 seconds.")
+
+        # Validate URL format
+        if not tandoor_url.startswith(('http://', 'https://')):
+            raise ConfigurationError(f"Invalid Tandoor URL format: {tandoor_url}. Must start with http:// or https://")
 
         return tandoor_url, api_token, delay
 
-    except (configparser.NoSectionError, configparser.NoOptionError) as e:
-        print(f"❌ Configuration error: {e}")
-        print("Please check your config.conf file format.")
-        sys.exit(1)
+    except ConfigurationError:
+        raise
+    except Exception as e:
+        raise ConfigurationError(f"Unexpected error loading configuration: {e}") from e
 
 class FinalBulkImporter:
     def __init__(self, tandoor_url: str, api_token: str, delay: int, output_file: Optional[TextIO] = None):
@@ -133,26 +196,62 @@ class FinalBulkImporter:
         # Better to attempt and fail gracefully than to over-filter
         return True
 
-    def get_existing_source_urls(self):
-        """Get all existing recipe source URLs for duplicate detection"""
+    def get_existing_source_urls(self) -> set:
+        """Get all existing recipe source URLs for duplicate detection with robust error handling."""
         existing_urls = set()
         page = 1
+        max_retries = 3
+        base_delay = 1
 
         self.log_output("🔍 Fetching existing recipes for duplicate detection...")
 
         while True:
-            try:
-                response = self.session.get(f"{self.tandoor_url}/api/recipe/?page={page}&page_size=100", timeout=15)
+            retry_count = 0
+            while retry_count <= max_retries:
+                try:
+                    response = self.session.get(
+                        f"{self.tandoor_url}/api/recipe/?page={page}&page_size=100", 
+                        timeout=30
+                    )
 
-                if response.status_code == 429:
-                    self.log_output("⏳ Rate limited while fetching existing recipes, waiting...")
-                    time.sleep(60)
-                    continue
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get('Retry-After', 60))
+                        self.log_output(f"⏳ Rate limited while fetching existing recipes, waiting {retry_after}s...")
+                        time.sleep(retry_after)
+                        continue
 
-                if response.status_code != 200:
-                    self.log_output(f"❌ Error fetching existing recipes: {response.status_code}")
+                    response.raise_for_status()
                     break
 
+                except (Timeout, ConnectionError) as e:
+                    retry_count += 1
+                    if retry_count > max_retries:
+                        raise NetworkError(f"Failed to connect to Tandoor after {max_retries} retries: {e}")
+                    
+                    wait_time = base_delay * (2 ** (retry_count - 1))  # Exponential backoff
+                    self.log_output(f"🔄 Network error (retry {retry_count}/{max_retries}), waiting {wait_time}s: {e}")
+                    time.sleep(wait_time)
+
+                except HTTPError as e:
+                    if e.response.status_code == 401:
+                        raise NetworkError("Authentication failed. Check your API token.")
+                    elif e.response.status_code == 403:
+                        raise NetworkError("Access forbidden. Check your API permissions.")
+                    elif e.response.status_code >= 500:
+                        retry_count += 1
+                        if retry_count > max_retries:
+                            raise NetworkError(f"Server error after {max_retries} retries: {e}")
+                        
+                        wait_time = base_delay * (2 ** (retry_count - 1))
+                        self.log_output(f"🔄 Server error (retry {retry_count}/{max_retries}), waiting {wait_time}s: {e}")
+                        time.sleep(wait_time)
+                    else:
+                        raise NetworkError(f"HTTP error fetching existing recipes: {e}")
+
+                except RequestException as e:
+                    raise NetworkError(f"Request failed while fetching existing recipes: {e}")
+
+            try:
                 data = response.json()
                 results = data.get('results', [])
 
@@ -161,8 +260,10 @@ class FinalBulkImporter:
 
                 # Check each recipe for source_url
                 for recipe in results:
+                    if not isinstance(recipe, dict):
+                        continue
                     source_url = recipe.get('source_url')
-                    if source_url:
+                    if source_url and isinstance(source_url, str):
                         existing_urls.add(source_url.strip())
 
                 if not data.get('next'):
@@ -171,9 +272,8 @@ class FinalBulkImporter:
                 page += 1
                 time.sleep(1)  # Small delay between pagination requests
 
-            except Exception as e:
-                self.log_output(f"❌ Error getting existing recipes: {e}")
-                break
+            except (ValueError, KeyError) as e:
+                raise RecipeProcessingError(f"Invalid response format from Tandoor: {e}")
 
         self.log_output(f"📊 Found {len(existing_urls)} existing recipes with source URLs")
         return existing_urls
@@ -333,11 +433,35 @@ class FinalBulkImporter:
         self.log_output(f"📂 Loading URLs from {filename}")
 
         try:
-            with open(filename, 'r') as f:
-                urls = [line.strip() for line in f if line.strip()]
+            file_path = Path(filename)
+            
+            if not file_path.exists():
+                raise FileOperationError(f"URL file not found: {filename}")
+            
+            if not file_path.is_file():
+                raise FileOperationError(f"Path is not a file: {filename}")
+            
+            if file_path.stat().st_size > 100 * 1024 * 1024:  # 100MB limit
+                raise FileOperationError(f"File too large (>100MB): {filename}")
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                urls = []
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if line and not line.startswith('#'):  # Skip empty lines and comments
+                        if len(line) > 2048:  # Reasonable URL length limit
+                            self.log_output(f"⚠️ Skipping overly long URL on line {line_num}")
+                            continue
+                        urls.append(line)
+                        
+        except UnicodeDecodeError as e:
+            raise FileOperationError(f"File encoding error: {e}. Ensure file is UTF-8 encoded.")
+        except PermissionError as e:
+            raise FileOperationError(f"Permission denied reading file: {e}")
+        except OSError as e:
+            raise FileOperationError(f"OS error reading file: {e}")
         except Exception as e:
-            self.log_output(f"❌ Error reading file: {e}")
-            return
+            raise FileOperationError(f"Unexpected error reading file: {e}") from e
 
         # Filter and validate URLs
         valid_urls = []
@@ -483,15 +607,37 @@ def main() -> None:
     
     args = parser.parse_args()
     
-    # Load configuration
-    tandoor_url, api_token, delay = load_config()
+    # Setup logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Load configuration with comprehensive error handling
+        tandoor_url, api_token, delay = load_config()
+        logger.info("Configuration loaded successfully")
+        
+    except ConfigurationError as e:
+        print(f"❌ Configuration Error: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Unexpected configuration error: {e}")
+        logger.exception("Unexpected error during configuration loading")
+        sys.exit(1)
     
     # Setup output file if specified
     output_file = None
     if args.output:
         try:
-            output_file = open(args.output, 'w', encoding='utf-8')
-        except IOError as e:
+            output_path = Path(args.output)
+            # Ensure parent directory exists
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_file = open(output_path, 'w', encoding='utf-8')
+            logger.info(f"Output file opened: {output_path}")
+        except (IOError, OSError) as e:
             print(f"❌ Error opening output file {args.output}: {e}")
             sys.exit(1)
     
@@ -503,10 +649,36 @@ def main() -> None:
         importer.log_output("=" * 60)
         
         importer.import_from_file(args.url_file, args.start_from, args.max_imports)
+        logger.info("Import process completed successfully")
+        
+    except FileOperationError as e:
+        print(f"❌ File Error: {e}")
+        sys.exit(1)
+    except NetworkError as e:
+        print(f"❌ Network Error: {e}")
+        sys.exit(1)
+    except RecipeProcessingError as e:
+        print(f"❌ Recipe Processing Error: {e}")
+        sys.exit(1)
+    except TandoorImporterError as e:
+        print(f"❌ Import Error: {e}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\n🛑 Import interrupted by user")
+        logger.info("Import interrupted by user (Ctrl+C)")
+        sys.exit(130)  # Standard exit code for SIGINT
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        logger.exception("Unexpected error during import process")
+        sys.exit(1)
         
     finally:
         if output_file:
-            output_file.close()
+            try:
+                output_file.close()
+                logger.info("Output file closed successfully")
+            except Exception as e:
+                print(f"⚠️ Warning: Error closing output file: {e}")
 
 
 if __name__ == "__main__":
