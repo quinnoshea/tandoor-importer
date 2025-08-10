@@ -7,10 +7,9 @@ import requests
 import time
 import sys
 import configparser
-import os
 import argparse
 import logging
-from typing import Optional, TextIO, Dict, Any, Tuple
+from typing import Optional, TextIO, Tuple
 from pathlib import Path
 from requests.exceptions import (
     RequestException, 
