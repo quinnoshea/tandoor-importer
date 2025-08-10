@@ -8,6 +8,8 @@ import time
 import sys
 import configparser
 import os
+import argparse
+from typing import Optional, TextIO
 
 def load_config():
     """Load configuration from config.conf file"""
@@ -42,10 +44,11 @@ def load_config():
         sys.exit(1)
 
 class FinalBulkImporter:
-    def __init__(self, tandoor_url, api_token, delay):
+    def __init__(self, tandoor_url: str, api_token: str, delay: int, output_file: Optional[TextIO] = None):
         self.tandoor_url = tandoor_url
         self.api_token = api_token
         self.delay = delay
+        self.output_file = output_file
 
         self.session = requests.Session()
         self.session.headers.update({
@@ -135,19 +138,19 @@ class FinalBulkImporter:
         existing_urls = set()
         page = 1
 
-        print("🔍 Fetching existing recipes for duplicate detection...")
+        self.log_output("🔍 Fetching existing recipes for duplicate detection...")
 
         while True:
             try:
                 response = self.session.get(f"{self.tandoor_url}/api/recipe/?page={page}&page_size=100", timeout=15)
 
                 if response.status_code == 429:
-                    print("⏳ Rate limited while fetching existing recipes, waiting...")
+                    self.log_output("⏳ Rate limited while fetching existing recipes, waiting...")
                     time.sleep(60)
                     continue
 
                 if response.status_code != 200:
-                    print(f"❌ Error fetching existing recipes: {response.status_code}")
+                    self.log_output(f"❌ Error fetching existing recipes: {response.status_code}")
                     break
 
                 data = response.json()
@@ -169,10 +172,10 @@ class FinalBulkImporter:
                 time.sleep(1)  # Small delay between pagination requests
 
             except Exception as e:
-                print(f"❌ Error getting existing recipes: {e}")
+                self.log_output(f"❌ Error getting existing recipes: {e}")
                 break
 
-        print(f"📊 Found {len(existing_urls)} existing recipes with source URLs")
+        self.log_output(f"📊 Found {len(existing_urls)} existing recipes with source URLs")
         return existing_urls
 
     def scrape_recipe(self, url):
@@ -246,33 +249,33 @@ class FinalBulkImporter:
 
     def import_single_recipe(self, url, index, total):
         """Complete import process for a single recipe"""
-        print(f"\n📝 [{index}/{total}] Importing: {url}")
+        self.log_output(f"\n📝 [{index}/{total}] Importing: {url}")
 
         # Step 1: Scrape
         scrape_success, scrape_result, images, _ = self.scrape_recipe(url)
         if not scrape_success:
             if "rate_limited" in scrape_result:
                 self.stats['rate_limited'] += 1
-                print("⏳ Rate limited during scrape")
+                self.log_output("⏳ Rate limited during scrape")
                 return "rate_limited"
             elif "duplicate" in scrape_result:
                 self.stats['duplicates'] += 1
-                print(f"⚠️ Duplicate: {scrape_result}")
+                self.log_output(f"⚠️ Duplicate: {scrape_result}")
                 return "duplicate"
             elif "non_recipe:" in scrape_result:
                 self.stats['non_recipe_urls'] += 1
                 self.failed_urls['non_recipe_urls'].append((url, scrape_result))
-                print(f"🚫 Non-recipe URL: {scrape_result}")
+                self.log_output(f"🚫 Non-recipe URL: {scrape_result}")
                 return "non_recipe"
             elif "connection:" in scrape_result:
                 self.stats['connection_errors'] += 1
                 self.failed_urls['connection_errors'].append((url, scrape_result))
-                print(f"🌐 Connection error: {scrape_result}")
+                self.log_output(f"🌐 Connection error: {scrape_result}")
                 return "connection_error"
             else:
                 self.stats['failed_scrape'] += 1
                 self.failed_urls['failed_scrape'].append((url, scrape_result))
-                print(f"❌ Scrape failed: {scrape_result}")
+                self.log_output(f"❌ Scrape failed: {scrape_result}")
                 return "failed_scrape"
 
         recipe_data = scrape_result
@@ -283,21 +286,21 @@ class FinalBulkImporter:
         if not create_success:
             if "rate_limited" in create_result:
                 self.stats['rate_limited'] += 1
-                print("⏳ Rate limited during creation")
+                self.log_output("⏳ Rate limited during creation")
                 return "rate_limited"
             else:
                 self.stats['failed_create'] += 1
                 self.failed_urls['failed_create'].append((url, create_result))
-                print(f"❌ Create failed: {create_result}")
+                self.log_output(f"❌ Create failed: {create_result}")
                 return "failed_create"
 
         self.stats['successful'] += 1
-        print(f"✅ SUCCESS: '{recipe_name}' (ID: {recipe_id})")
+        self.log_output(f"✅ SUCCESS: '{recipe_name}' (ID: {recipe_id})")
         return "success"
 
     def wait_for_rate_limit_reset(self):
         """Wait for rate limit to reset"""
-        print("⏳ Waiting for rate limit to reset...")
+        self.log_output("⏳ Waiting for rate limit to reset...")
 
         # Try a simple GET request to check rate limit status
         for attempt in range(12):  # Try for up to 10 minutes
@@ -305,28 +308,35 @@ class FinalBulkImporter:
                 response = self.session.get(f"{self.tandoor_url}/api/recipe/?page_size=1", timeout=10)
 
                 if response.status_code != 429:
-                    print("✅ Rate limit appears to be reset!")
+                    self.log_output("✅ Rate limit appears to be reset!")
                     return True
 
-                print(f"⏳ Still rate limited... waiting 30s (attempt {attempt + 1}/12)")
+                self.log_output(f"⏳ Still rate limited... waiting 30s (attempt {attempt + 1}/12)")
                 time.sleep(30)
 
             except Exception as e:
-                print(f"⚠️ Error checking rate limit: {e}")
+                self.log_output(f"⚠️ Error checking rate limit: {e}")
                 time.sleep(30)
 
-        print("❌ Rate limit did not reset after 10 minutes")
+        self.log_output("❌ Rate limit did not reset after 10 minutes")
         return False
 
-    def import_from_file(self, filename, start_from=0, max_imports=None):
+    def log_output(self, message: str) -> None:
+        """Output message to both console and file if specified."""
+        print(message)
+        if self.output_file:
+            self.output_file.write(f"{message}\n")
+            self.output_file.flush()
+    
+    def import_from_file(self, filename: str, start_from: int = 0, max_imports: Optional[int] = None) -> None:
         """Import recipes from URL list file"""
-        print(f"📂 Loading URLs from {filename}")
+        self.log_output(f"📂 Loading URLs from {filename}")
 
         try:
             with open(filename, 'r') as f:
                 urls = [line.strip() for line in f if line.strip()]
         except Exception as e:
-            print(f"❌ Error reading file: {e}")
+            self.log_output(f"❌ Error reading file: {e}")
             return
 
         # Filter and validate URLs
@@ -337,23 +347,23 @@ class FinalBulkImporter:
             else:
                 self.stats['invalid_urls'] += 1
                 self.failed_urls['invalid_urls'].append(url)
-                print(f"🚫 Skipping invalid/non-recipe URL: {url[:60]}{'...' if len(url) > 60 else ''}")
+                self.log_output(f"🚫 Skipping invalid/non-recipe URL: {url[:60]}{'...' if len(url) > 60 else ''}")
 
-        print(f"📊 Found {len(valid_urls)} valid URLs ({self.stats['invalid_urls']} invalid)")
+        self.log_output(f"📊 Found {len(valid_urls)} valid URLs ({self.stats['invalid_urls']} invalid)")
 
         # Apply start/limit filters
         if start_from > 0:
             valid_urls = valid_urls[start_from:]
-            print(f"📊 Starting from index {start_from}, {len(valid_urls)} URLs remaining")
+            self.log_output(f"📊 Starting from index {start_from}, {len(valid_urls)} URLs remaining")
 
         if max_imports:
             valid_urls = valid_urls[:max_imports]
-            print(f"📊 Limited to {max_imports} imports")
+            self.log_output(f"📊 Limited to {max_imports} imports")
 
         self.stats['total'] = len(valid_urls)
 
         if not valid_urls:
-            print("❌ No valid URLs to import!")
+            self.log_output("❌ No valid URLs to import!")
             return
 
         # Get existing recipes to skip duplicates
@@ -362,16 +372,16 @@ class FinalBulkImporter:
         pre_existing_count = len(valid_urls) - len(new_urls)
 
         if pre_existing_count > 0:
-            print(f"⚠️ Skipping {pre_existing_count} URLs that already exist in database")
+            self.log_output(f"⚠️ Skipping {pre_existing_count} URLs that already exist in database")
             self.stats['duplicates'] += pre_existing_count
 
         if not new_urls:
-            print("✅ All URLs already imported!")
+            self.log_output("✅ All URLs already imported!")
             return
 
-        print(f"🚀 Starting import of {len(new_urls)} new recipes...")
+        self.log_output(f"🚀 Starting import of {len(new_urls)} new recipes...")
         estimated_minutes = (len(new_urls) * self.delay) / 60
-        print(f"⏱️ Estimated time: {estimated_minutes:.1f} minutes")
+        self.log_output(f"⏱️ Estimated time: {estimated_minutes:.1f} minutes")
 
         # Import each URL
         for i, url in enumerate(new_urls, 1):
@@ -379,41 +389,41 @@ class FinalBulkImporter:
 
             # Handle rate limiting
             if result == "rate_limited":
-                print("⏳ Hit rate limit, waiting for reset...")
+                self.log_output("⏳ Hit rate limit, waiting for reset...")
                 if self.wait_for_rate_limit_reset():
-                    print("🔄 Retrying current recipe...")
+                    self.log_output("🔄 Retrying current recipe...")
                     result = self.import_single_recipe(url, i, len(new_urls))
                 else:
-                    print("❌ Could not recover from rate limit, stopping import")
+                    self.log_output("❌ Could not recover from rate limit, stopping import")
                     break
 
             # Print progress
             success_rate = (self.stats['successful'] / i) * 100 if i > 0 else 0
-            print(f"📊 Progress: {i}/{len(new_urls)} ({i/len(new_urls)*100:.1f}%) | Success rate: {success_rate:.1f}%")
-            print(f"📈 Stats: ✅{self.stats['successful']} ⚠️{self.stats['duplicates']} "
+            self.log_output(f"📊 Progress: {i}/{len(new_urls)} ({i/len(new_urls)*100:.1f}%) | Success rate: {success_rate:.1f}%")
+            self.log_output(f"📈 Stats: ✅{self.stats['successful']} ⚠️{self.stats['duplicates']} "
                   f"🚫{self.stats['non_recipe_urls']} 🌐{self.stats['connection_errors']} "
                   f"❌{self.stats['failed_scrape']+self.stats['failed_create']} ⏳{self.stats['rate_limited']}")
 
             # Wait between requests (except on last one)
             if i < len(new_urls):
-                print(f"⏱️ Waiting {self.delay}s before next import...")
+                self.log_output(f"⏱️ Waiting {self.delay}s before next import...")
                 time.sleep(self.delay)
 
         # Final report
-        print("\n🎉 BULK IMPORT COMPLETE!")
-        print("📊 Final Stats:")
-        print(f"   Total processed: {self.stats['total']}")
-        print(f"   ✅ Successful imports: {self.stats['successful']}")
-        print(f"   ⚠️ Duplicates skipped: {self.stats['duplicates']}")
-        print(f"   ❌ Failed scraping: {self.stats['failed_scrape']}")
-        print(f"   ❌ Failed creation: {self.stats['failed_create']}")
-        print(f"   🚫 Non-recipe URLs: {self.stats['non_recipe_urls']}")
-        print(f"   🌐 Connection errors: {self.stats['connection_errors']}")
-        print(f"   ⏳ Rate limited: {self.stats['rate_limited']}")
-        print(f"   🚫 Invalid URLs: {self.stats['invalid_urls']}")
+        self.log_output("\n🎉 BULK IMPORT COMPLETE!")
+        self.log_output("📊 Final Stats:")
+        self.log_output(f"   Total processed: {self.stats['total']}")
+        self.log_output(f"   ✅ Successful imports: {self.stats['successful']}")
+        self.log_output(f"   ⚠️ Duplicates skipped: {self.stats['duplicates']}")
+        self.log_output(f"   ❌ Failed scraping: {self.stats['failed_scrape']}")
+        self.log_output(f"   ❌ Failed creation: {self.stats['failed_create']}")
+        self.log_output(f"   🚫 Non-recipe URLs: {self.stats['non_recipe_urls']}")
+        self.log_output(f"   🌐 Connection errors: {self.stats['connection_errors']}")
+        self.log_output(f"   ⏳ Rate limited: {self.stats['rate_limited']}")
+        self.log_output(f"   🚫 Invalid URLs: {self.stats['invalid_urls']}")
 
         success_rate = (self.stats['successful'] / max(1, len(new_urls))) * 100
-        print(f"   📈 Success rate: {success_rate:.1f}%")
+        self.log_output(f"   📈 Success rate: {success_rate:.1f}%")
 
         # Display failed URLs if any
         total_failures = (self.stats['failed_scrape'] + self.stats['failed_create'] +
@@ -421,56 +431,82 @@ class FinalBulkImporter:
                          self.stats['invalid_urls'])
 
         if total_failures > 0:
-            print(f"\n❌ FAILED URLS ({total_failures} total):")
+            self.log_output(f"\n❌ FAILED URLS ({total_failures} total):")
 
             if self.failed_urls['invalid_urls']:
-                print(f"\n🚫 Invalid URLs ({len(self.failed_urls['invalid_urls'])}):")
+                self.log_output(f"\n🚫 Invalid URLs ({len(self.failed_urls['invalid_urls'])}):")
                 for url in self.failed_urls['invalid_urls']:
-                    print(f"   {url}")
+                    self.log_output(f"   {url}")
 
             if self.failed_urls['non_recipe_urls']:
-                print(f"\n🚫 Non-recipe URLs ({len(self.failed_urls['non_recipe_urls'])}):")
+                self.log_output(f"\n🚫 Non-recipe URLs ({len(self.failed_urls['non_recipe_urls'])}):")
                 for url, reason in self.failed_urls['non_recipe_urls']:
-                    print(f"   {url} - {reason}")
+                    self.log_output(f"   {url} - {reason}")
 
             if self.failed_urls['connection_errors']:
-                print(f"\n🌐 Connection errors ({len(self.failed_urls['connection_errors'])}):")
+                self.log_output(f"\n🌐 Connection errors ({len(self.failed_urls['connection_errors'])}):")
                 for url, reason in self.failed_urls['connection_errors']:
-                    print(f"   {url} - {reason}")
+                    self.log_output(f"   {url} - {reason}")
 
             if self.failed_urls['failed_scrape']:
-                print(f"\n❌ Failed scraping ({len(self.failed_urls['failed_scrape'])}):")
+                self.log_output(f"\n❌ Failed scraping ({len(self.failed_urls['failed_scrape'])}):")
                 for url, reason in self.failed_urls['failed_scrape']:
-                    print(f"   {url} - {reason}")
+                    self.log_output(f"   {url} - {reason}")
 
             if self.failed_urls['failed_create']:
-                print(f"\n❌ Failed creation ({len(self.failed_urls['failed_create'])}):")
+                self.log_output(f"\n❌ Failed creation ({len(self.failed_urls['failed_create'])}):")
                 for url, reason in self.failed_urls['failed_create']:
-                    print(f"   {url} - {reason}")
+                    self.log_output(f"   {url} - {reason}")
         else:
-            print("\n✅ No failed URLs!")
+            self.log_output("\n✅ No failed URLs!")
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 tandoor-importer.py <url_file> [start_index] [max_imports]")
-        print("Example: python3 tandoor-importer.py url-list.txt 0 10")
-        sys.exit(1)
-
-    filename = sys.argv[1]
-    start_from = int(sys.argv[2]) if len(sys.argv) > 2 else 0
-    max_imports = int(sys.argv[3]) if len(sys.argv) > 3 else None
-
+def main() -> None:
+    """Main entry point with argument parsing."""
+    parser = argparse.ArgumentParser(
+        description="Bulk import recipes from URLs into Tandoor Recipes",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  %(prog)s url-list.txt
+  %(prog)s url-list.txt --start-from 100
+  %(prog)s url-list.txt --max-imports 50 --output results.log
+  %(prog)s url-list.txt --start-from 100 --max-imports 25 -o import.log"""
+    )
+    
+    parser.add_argument("url_file", help="Path to text file containing recipe URLs")
+    parser.add_argument("--start-from", type=int, default=0, 
+                       help="Line number to start from (default: 0)")
+    parser.add_argument("--max-imports", type=int, 
+                       help="Maximum number of recipes to import")
+    parser.add_argument("-o", "--output", type=str,
+                       help="Output results to file")
+    
+    args = parser.parse_args()
+    
     # Load configuration
     tandoor_url, api_token, delay = load_config()
-
-    importer = FinalBulkImporter(tandoor_url, api_token, delay)
-
-    print("🔧 TANDOOR BULK RECIPE IMPORTER")
-    print("Using corrected two-step import process")
-    print("=" * 60)
-
-    importer.import_from_file(filename, start_from, max_imports)
+    
+    # Setup output file if specified
+    output_file = None
+    if args.output:
+        try:
+            output_file = open(args.output, 'w', encoding='utf-8')
+        except IOError as e:
+            print(f"❌ Error opening output file {args.output}: {e}")
+            sys.exit(1)
+    
+    try:
+        importer = FinalBulkImporter(tandoor_url, api_token, delay, output_file)
+        
+        importer.log_output("🔧 TANDOOR BULK RECIPE IMPORTER")
+        importer.log_output("Using corrected two-step import process")
+        importer.log_output("=" * 60)
+        
+        importer.import_from_file(args.url_file, args.start_from, args.max_imports)
+        
+    finally:
+        if output_file:
+            output_file.close()
 
 
 if __name__ == "__main__":
