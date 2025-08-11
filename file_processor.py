@@ -78,48 +78,37 @@ def process_url_file(
         importer.log_output("❌ No valid URLs to import!")
         return
 
-    # Intelligent redirect-aware duplicate detection
-    importer.log_output("🔍 Using redirect-aware duplicate detection for optimal image enhancement")
-    
-    # Get existing recipes for smart duplicate detection
+    # Get existing recipes for duplicate detection
+    importer.log_output("🔍 File Processor fetching existing recipes for duplicate detection...")
     existing_urls = importer.get_existing_source_urls()
     
-    # Smart filtering: resolve redirects and check for duplicates
+    # Filter out URLs that already exist (with normalization)
     new_urls = []
     pre_existing_count = 0
-    redirect_resolved_count = 0
     
     for url in valid_urls:
-        original_url = url.strip()
+        # Normalize the URL for comparison and try to resolve redirects
+        normalized_url = importer._resolve_url_redirects(url)
+        original_normalized = importer._normalize_url_for_comparison(url)
         
-        # Resolve redirects to get the final destination URL
-        resolved_url = importer._resolve_url_redirects(original_url)
-        if resolved_url != importer._normalize_url_for_comparison(original_url):
-            redirect_resolved_count += 1
+        # Check if this URL (or its normalized/redirected versions) already exists
+        is_duplicate = False
+        for existing_url in existing_urls:
+            # Compare multiple variations
+            if (normalized_url == existing_url or 
+                original_normalized == existing_url or 
+                url == existing_url):
+                is_duplicate = True
+                break
         
-        # Check if either original, normalized, or resolved URL exists
-        normalized_url = importer._normalize_url_for_comparison(original_url)
-        
-        url_exists = (
-            original_url in existing_urls or 
-            normalized_url in existing_urls or 
-            resolved_url in existing_urls
-        )
-        
-        if not url_exists:
-            new_urls.append(url)
-        else:
+        if is_duplicate:
             pre_existing_count += 1
-            importer.stats['duplicates'] += 1
-    
-    if redirect_resolved_count > 0:
-        importer.log_output(f"🔄 Resolved {redirect_resolved_count} URL redirects for better duplicate detection")
-    
-    if pre_existing_count > 0:
-        importer.log_output(f"⚠️ Skipping {pre_existing_count} URLs that resolve to existing recipes (including redirects)")
-    else:
-        pre_existing_count = 0
+            importer.log_output(f"⚠️ Skipping duplicate URL: {url}")
+        else:
+            new_urls.append(url)
 
+    importer.log_output(f"📊 Duplicate analysis: {pre_existing_count} duplicates found, {len(new_urls)} new URLs to import")
+    
     if not new_urls:
         importer.log_output("✅ All URLs already imported!")
         return

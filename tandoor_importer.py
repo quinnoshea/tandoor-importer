@@ -86,7 +86,7 @@ def main() -> None:
         importer = BulkImporter(tandoor_url, api_token, delay, output_file)
         
         importer.log_output("🔧 TANDOOR BULK RECIPE IMPORTER")
-        importer.log_output("Using corrected two-step import process")
+        importer.log_output("Engaging two-stage import process")
         importer.log_output("=" * 60)
         
         process_url_file(importer, args.url_file, args.start_from, args.max_imports)

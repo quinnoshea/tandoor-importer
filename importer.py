@@ -176,7 +176,7 @@ class BulkImporter:
         max_retries = 3
         base_delay = 1
 
-        self.log_output("🔍 Fetching existing recipes for duplicate detection...")
+        self.log_output("🔍 Importer fetching existing recipes for duplicate detection...")
 
         while True:
             response = None
