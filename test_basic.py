@@ -349,7 +349,9 @@ class TestNetworkOperations:
             mock_put.assert_called_once()
             call_args = mock_put.call_args
             assert 'image/' in call_args[0][0]  # URL contains 'image/'
-            assert call_args[1]['json'] == {'image_url': 'https://example.com/image.jpg'}
+            # Check that files parameter was used (multipart format)
+            assert 'files' in call_args[1]
+            assert call_args[1]['files']['image_url'][1] == 'https://example.com/image.jpg'
             
         print("✅ Image upload functionality test passed")
 

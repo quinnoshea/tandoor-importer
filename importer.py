@@ -272,7 +272,8 @@ class BulkImporter:
         headers = {'Content-Type': 'application/json'}
 
         try:
-            # Create recipe first without image
+            # The recipe_data should already contain image_url from Tandoor's scraper
+            # Create recipe with the image_url already included
             response = self.session.post(create_url, json=recipe_data, headers=headers, timeout=30)
 
             if response.status_code == 429:
@@ -282,11 +283,18 @@ class BulkImporter:
                 created_recipe = response.json()
                 recipe_id = created_recipe.get('id')
                 
-                # Now add image if available using separate endpoint
-                if images and recipe_id:
-                    image_success = self._upload_recipe_image(recipe_id, images[0])
+                # Upload primary image - prioritize image_url from recipe data, then images array
+                primary_image_url = recipe_data.get('image_url')
+                if not primary_image_url and images:
+                    primary_image_url = images[0]
+                
+                if primary_image_url and recipe_id:
+                    self.log_output(f"   📸 Uploading primary image: {primary_image_url[:60]}{'...' if len(primary_image_url) > 60 else ''}")
+                    image_success = self._upload_recipe_image(recipe_id, primary_image_url)
                     if not image_success:
-                        self.log_output(f"   ⚠️ Recipe created successfully but image upload failed")
+                        self.log_output(f"   ⚠️ Primary image upload failed")
+                else:
+                    self.log_output(f"   ℹ️ No image URL found for upload")
                 
                 return True, created_recipe, recipe_id
             else:
@@ -299,12 +307,14 @@ class BulkImporter:
         """Upload image to recipe using Tandoor's image endpoint"""
         try:
             image_endpoint = f"{self.tandoor_url}/api/recipe/{recipe_id}/image/"
-            image_data = {'image_url': image_url}
+            
+            # Use multipart/form-data format - Tandoor's image endpoint expects this
+            # The format (None, url) tells requests to send it as a form field, not a file
+            files_data = {'image_url': (None, image_url)}
             
             response = self.session.put(
                 image_endpoint, 
-                json=image_data, 
-                headers={'Content-Type': 'application/json'},
+                files=files_data,  # Use files parameter for multipart data
                 timeout=30
             )
             
