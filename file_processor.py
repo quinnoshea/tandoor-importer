@@ -78,14 +78,13 @@ def process_url_file(
         importer.log_output("❌ No valid URLs to import!")
         return
 
-    # Get existing recipes to skip duplicates
-    existing_urls = importer.get_existing_source_urls()
-    new_urls = [url for url in valid_urls if url not in existing_urls]
-    pre_existing_count = len(valid_urls) - len(new_urls)
-
-    if pre_existing_count > 0:
-        importer.log_output(f"⚠️ Skipping {pre_existing_count} URLs that already exist in database")
-        importer.stats['duplicates'] += pre_existing_count
+    # Modified duplicate detection: Let Tandoor's scraper handle duplicates and image enhancement
+    # The pre-filtering was too aggressive and prevented image enhancement opportunities
+    importer.log_output("🎯 Using Tandoor's intelligent duplicate detection and image enhancement")
+    
+    # Process all valid URLs - let Tandoor's scraper decide on duplicates and enhancements
+    new_urls = valid_urls
+    pre_existing_count = 0
 
     if not new_urls:
         importer.log_output("✅ All URLs already imported!")

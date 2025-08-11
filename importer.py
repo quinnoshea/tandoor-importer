@@ -128,6 +128,33 @@ class BulkImporter:
         # Better to attempt and fail gracefully than to over-filter
         return True
 
+    def _normalize_url_for_comparison(self, url: str) -> str:
+        """Normalize URL to handle common redirect patterns for better duplicate detection"""
+        if not url or not isinstance(url, str):
+            return url
+        
+        url = url.strip().lower()
+        
+        # Handle protocol differences
+        url = url.replace('http://', 'https://')
+        
+        # Handle common domain redirects/rebrands
+        domain_mappings = {
+            'www.kingarthurflour.com': 'www.kingarthurbaking.com',
+            'kingarthurflour.com': 'kingarthurbaking.com',
+            # Add other known domain mappings here as discovered
+        }
+        
+        for old_domain, new_domain in domain_mappings.items():
+            if old_domain in url:
+                url = url.replace(old_domain, new_domain)
+        
+        # Remove trailing slashes for consistent comparison
+        if url.endswith('/'):
+            url = url[:-1]
+        
+        return url
+
     def get_existing_source_urls(self) -> set:
         """Get all existing recipe source URLs for duplicate detection with robust error handling."""
         existing_urls = set()
@@ -200,12 +227,32 @@ class BulkImporter:
                     break
 
                 # Check each recipe for source_url
+                # Note: paginated API doesn't include source_url, need detailed calls
                 for recipe in results:
                     if not isinstance(recipe, dict):
                         continue
-                    source_url = recipe.get('source_url')
-                    if source_url and isinstance(source_url, str):
-                        existing_urls.add(source_url.strip())
+                    recipe_id = recipe.get('id')
+                    if recipe_id:
+                        # Get detailed recipe data to access source_url field
+                        try:
+                            detail_response = self.session.get(
+                                f"{self.tandoor_url}/api/recipe/{recipe_id}/",
+                                timeout=10
+                            )
+                            if detail_response.status_code == 200:
+                                detail_data = detail_response.json()
+                                source_url = detail_data.get('source_url')
+                                if source_url and isinstance(source_url, str):
+                                    # Store both original and normalized URLs for comparison
+                                    original_url = source_url.strip()
+                                    normalized_url = self._normalize_url_for_comparison(original_url)
+                                    existing_urls.add(original_url)
+                                    if normalized_url != original_url:
+                                        existing_urls.add(normalized_url)
+                        except Exception as e:
+                            # Don't fail the whole process if one recipe fetch fails
+                            self.log_output(f"   ⚠️ Could not fetch details for recipe {recipe_id}: {e}")
+                            continue
 
                 if not data.get('next'):
                     break
@@ -266,8 +313,13 @@ class BulkImporter:
             if not recipe_data:
                 return False, "no_recipe_data", None, None
 
-            # Validate and fix critical fields that cause HTTP 400 errors
-            recipe_data = self._validate_and_fix_recipe_data(recipe_data, url)
+            # Validate recipe data quality - detect failed scraping
+            validation_result = self._validate_recipe_quality(recipe_data, url)
+            if not validation_result['is_valid']:
+                return False, f"failed_scrape: {validation_result['reason']}", None, None
+            
+            # Apply any necessary fixes to recipe data
+            recipe_data = self._apply_recipe_data_fixes(recipe_data, url)
             if not recipe_data:
                 return False, "invalid_recipe_data", None, None
 
@@ -277,8 +329,58 @@ class BulkImporter:
         except Exception as e:
             return False, f"exception: {e}", None, None
 
-    def _validate_and_fix_recipe_data(self, recipe_data: dict, source_url: str) -> dict:
-        """Validate and fix recipe data to prevent HTTP 400 errors"""
+    def _validate_recipe_quality(self, recipe_data: dict, source_url: str) -> dict:
+        """Validate if recipe data contains meaningful content or is the result of failed scraping"""
+        try:
+            # Check for completely failed scraping - multiple critical fields empty
+            critical_empty_count = 0
+            critical_fields = ['name', 'description', 'image_url']
+            
+            for field in critical_fields:
+                value = recipe_data.get(field, '')
+                if not value or not str(value).strip():
+                    critical_empty_count += 1
+            
+            # Check if steps contain any meaningful content
+            steps = recipe_data.get('steps', [])
+            has_meaningful_steps = False
+            if steps and isinstance(steps, list):
+                for step in steps:
+                    instruction = step.get('instruction', '').strip() if isinstance(step, dict) else ''
+                    ingredients = step.get('ingredients', []) if isinstance(step, dict) else []
+                    if instruction or (ingredients and len(ingredients) > 0):
+                        has_meaningful_steps = True
+                        break
+            
+            # If most critical fields are empty AND no meaningful steps, it's failed scraping
+            if critical_empty_count >= 2 and not has_meaningful_steps:
+                # Determine specific failure reason
+                domain = source_url.split('/')[2] if '/' in source_url else 'unknown'
+                
+                # Known problematic domains
+                problematic_domains = {
+                    'www.foodnetwork.com': 'Food Network requires special handling that Tandoor cannot provide',
+                    'www.food.com': 'Food.com has anti-scraping measures',
+                    'www.allrecipes.com': 'AllRecipes may have updated their structure'
+                }
+                
+                reason = problematic_domains.get(domain, f'Website {domain} returned no usable recipe data')
+                
+                return {
+                    'is_valid': False,
+                    'reason': reason,
+                    'empty_fields': critical_empty_count,
+                    'has_steps': has_meaningful_steps
+                }
+            
+            return {'is_valid': True}
+            
+        except Exception as e:
+            self.log_output(f"   ❌ Error validating recipe quality: {e}")
+            return {'is_valid': True}  # If validation fails, allow through (fail-open)
+
+    def _apply_recipe_data_fixes(self, recipe_data: dict, source_url: str) -> Optional[dict]:
+        """Apply minor fixes to recipe data for edge cases (only used for recipes with meaningful content)"""
         try:
             # Fix empty/blank name field - critical for recipe creation
             name = recipe_data.get('name', '').strip()
@@ -304,25 +406,46 @@ class BulkImporter:
                 recipe_data['name'] = recipe_data['name'][:125] + "..."
                 self.log_output(f"   ⚠️ Recipe name truncated to 128 characters")
 
-            # Fix empty description - not critical but good UX
-            if not recipe_data.get('description', '').strip():
-                recipe_data['description'] = f"Recipe imported from {source_url}"
-                self.log_output(f"   ℹ️ Empty description, using URL fallback")
-
-            # Ensure minimum required steps structure
-            if not recipe_data.get('steps') or len(recipe_data.get('steps', [])) == 0:
-                recipe_data['steps'] = [{'instruction': 'See original recipe for instructions', 'ingredients': []}]
-                self.log_output(f"   ⚠️ No recipe steps found, added placeholder step")
-
             # Ensure servings is valid
-            if not isinstance(recipe_data.get('servings'), int) or recipe_data.get('servings') <= 0:
+            servings = recipe_data.get('servings')
+            if not isinstance(servings, int) or servings <= 0:
                 recipe_data['servings'] = 1
                 self.log_output(f"   ℹ️ Invalid servings value, defaulting to 1")
+
+            # Fix keyword name field length (Tandoor limit: 64 characters)
+            keywords = recipe_data.get('keywords', [])
+            if keywords and isinstance(keywords, list):
+                fixed_keywords = []
+                for keyword in keywords:
+                    if isinstance(keyword, dict) and 'name' in keyword:
+                        original_name = keyword.get('name', '')
+                        if isinstance(original_name, str) and len(original_name) > 64:
+                            truncated_name = original_name[:61] + "..."
+                            keyword['name'] = truncated_name
+                            self.log_output(f"   ⚠️ Keyword name truncated: '{original_name[:30]}...' → '{truncated_name}'")
+                    fixed_keywords.append(keyword)
+                recipe_data['keywords'] = fixed_keywords
 
             return recipe_data
 
         except Exception as e:
-            self.log_output(f"   ❌ Error validating recipe data: {e}")
+            self.log_output(f"   ❌ Error applying recipe data fixes: {e}")
+            return None
+
+    def _fetch_recipe_by_id(self, recipe_id: int) -> Optional[dict]:
+        """Fetch full recipe data by ID to check image status"""
+        try:
+            recipe_url = f"{self.tandoor_url}/api/recipe/{recipe_id}/"
+            response = self.session.get(recipe_url, timeout=30)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                self.log_output(f"   ⚠️ Failed to fetch recipe {recipe_id}: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            self.log_output(f"   ❌ Error fetching recipe {recipe_id}: {e}")
             return None
 
     def _try_enhance_duplicate_recipe(self, duplicate_recipe: dict, scrape_result: dict, source_url: str) -> bool:
@@ -331,8 +454,21 @@ class BulkImporter:
             duplicate_id = duplicate_recipe.get('id')
             duplicate_name = duplicate_recipe.get('name', 'Unknown')
             
-            # Check if duplicate has an image
-            has_image = duplicate_recipe.get('image') and duplicate_recipe.get('image').strip()
+            # Validate duplicate_id is an integer
+            if not isinstance(duplicate_id, int):
+                self.log_output(f"   ❌ Invalid duplicate recipe ID: {duplicate_id}")
+                return False
+            
+            # Fetch full recipe data to check if it has an image
+            # The duplicate data from API only has id/name - need full recipe info
+            full_recipe = self._fetch_recipe_by_id(duplicate_id)
+            if not full_recipe:
+                self.log_output(f"   ❌ Could not fetch full recipe data for ID {duplicate_id}")
+                return False
+            
+            # Check if duplicate has an image using full recipe data
+            image_value = full_recipe.get('image')
+            has_image = image_value and isinstance(image_value, str) and image_value.strip()
             
             if has_image:
                 self.log_output(f"   ℹ️ Duplicate recipe '{duplicate_name}' already has image, skipping enhancement")
@@ -483,6 +619,10 @@ class BulkImporter:
         recipe_name = recipe_data.get('name', 'Unknown')
 
         # Step 2: Create
+        # Ensure source_url is set to the original URL we're importing from
+        if 'source_url' not in recipe_data or not recipe_data['source_url']:
+            recipe_data['source_url'] = url
+        
         create_success, create_result, recipe_id = self.create_recipe(recipe_data, images)
         if not create_success:
             if "rate_limited" in create_result:

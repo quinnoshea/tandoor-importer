@@ -206,11 +206,11 @@ The script provides detailed console output including:
 The project includes a comprehensive test suite with high code coverage:
 
 ```bash
-# Run the test suite
-python test_basic.py
+# Run the comprehensive test suite
+python test_tandoor_importer.py
 
 # Run with coverage (if coverage is installed)
-coverage run test_basic.py
+coverage run test_tandoor_importer.py
 coverage report
 coverage html  # Generate HTML coverage report
 ```

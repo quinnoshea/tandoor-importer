@@ -63,8 +63,8 @@ jobs:
           exit 1
         fi
         
-        # Run actual tests that execute the code
-        $COVERAGE_CMD run --source=. test_basic.py
+        # Run comprehensive tests that execute the code
+        $COVERAGE_CMD run --source=. test_tandoor_importer.py
         $COVERAGE_CMD xml
         $COVERAGE_CMD report
 
