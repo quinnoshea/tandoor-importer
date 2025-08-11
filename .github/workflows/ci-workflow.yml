@@ -1,77 +1,82 @@
-name: Continuous Integration
+name: CI - Tandoor Recipe Importer
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
-    build:
-        if: github.repository_owner == 'quinnoshea'
-        runs-on: ubuntu-latest
-        strategy:
-            max-parallel: 4
-            matrix:
-                python-version: ["3.12"]
-                node-version: ["22"]
-        steps:
-            - uses: actions/checkout@v4
-            - uses: awalsh128/cache-apt-pkgs-action@v1.5.1
-              with:
-                  packages: libsasl2-dev python3-dev libxml2-dev libxmlsec1-dev libxslt-dev libxmlsec1-openssl libxslt-dev libldap2-dev libssl-dev gcc musl-dev postgresql-dev zlib-dev jpeg-dev libwebp-dev openssl-dev libffi-dev cargo openldap-dev python3-dev xmlsec-dev xmlsec build-base g++ curl
-                  version: 1.0
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ '3.9', '3.10', '3.11', '3.12' ]
 
-            # Setup python & dependencies
-            - name: Set up Python ${{ matrix.python-version }}
-              uses: actions/setup-python@v5
-              with:
-                  python-version: ${{ matrix.python-version }}
-                  cache: "pip"
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-            - name: Install Python Dependencies
-              run: |
-                  python -m pip install --upgrade pip
-                  pip install -r requirements.txt
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
 
-            - name: Cache StaticFiles
-              uses: actions/cache@v4
-              id: django_cache
-              with:
-                  path: |
-                      ./cookbook/static
-                      ./staticfiles
-                  key: |
-                      ${{ runner.os }}-${{ matrix.python-version }}-${{ matrix.node-version }}-collectstatic-${{ hashFiles('**/*.css', '**/*.js', 'vue3/src/*') }}
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests ruff bandit
+        sudo apt-get update
+        sudo apt-get install -y python3-coverage
+        python --version
+        pip list
 
-            # Build Vue frontend & Dependencies
-            - name: Set up Node ${{ matrix.node-version }}
-              if: steps.django_cache.outputs.cache-hit != 'true'
-              uses: actions/setup-node@v4
-              with:
-                  node-version: ${{ matrix.node-version }}
-                  cache: "yarn"
-                  cache-dependency-path: ./vue3/yarn.lock
+    - name: Run syntax check
+      run: |
+        python -m py_compile tandoor_importer.py
 
-            - name: Install Vue dependencies
-              if: steps.django_cache.outputs.cache-hit != 'true'
-              working-directory: ./vue3
-              run: yarn install
+    - name: Run linting with ruff
+      run: |
+        ruff check tandoor_importer.py
 
-            - name: Build Vue dependencies
-              if: steps.django_cache.outputs.cache-hit != 'true'
-              working-directory: ./vue3
-              run: yarn build
+    - name: Run security check with bandit
+      run: |
+        bandit tandoor_importer.py
 
-            - name: Compile Django StaticFiles
-              if: steps.django_cache.outputs.cache-hit != 'true'
-              run: |
-                  python3 manage.py collectstatic --noinput
+    - name: Create test config for coverage
+      run: |
+        cp config.conf.example config.conf
+        sed -i 's|https://your-tandoor-instance.com|https://demo.example.com|g' config.conf
+        sed -i 's|your_api_token_here|test_token_12345|g' config.conf
 
-            - uses: actions/cache/save@v4
-              if: steps.django_cache.outputs.cache-hit != 'true'
-              with:
-                  path: |
-                      ./cookbook/static
-                      ./staticfiles
-                  key: |
-                      ${{ runner.os }}-${{ matrix.python-version }}-${{ matrix.node-version }}-collectstatic-${{ hashFiles('**/*.css', '**/*.js', 'vue/src/*') }}
+    - name: Run basic tests with coverage
+      run: |
+        # Script already uses proper Python module naming
+        
+        # Use whichever coverage command is available
+        if command -v coverage >/dev/null 2>&1; then
+          COVERAGE_CMD="coverage"
+        elif command -v python3-coverage >/dev/null 2>&1; then
+          COVERAGE_CMD="python3-coverage"
+        else
+          echo "No coverage command found"
+          exit 1
+        fi
+        
+        # Run comprehensive tests that execute the code
+        $COVERAGE_CMD run --source=. test_tandoor_importer.py
+        $COVERAGE_CMD xml
+        $COVERAGE_CMD report
 
-            - name: Django Testing project
-              run: pytest --junitxml=junit/test-results-${{ matrix.python-version }}.xml
+    - name: Upload coverage to Codacy
+      if: github.event_name == 'push'
+      uses: codacy/codacy-coverage-reporter-action@v1
+      with:
+        project-token: ${{ secrets.CODACY_PROJECT_TOKEN }}
+        coverage-reports: coverage.xml
+
+    - name: Validate configuration files
+      run: |
+        # Check that config example exists and is valid
+        test -f config.conf.example
+        python -c "import configparser; c=configparser.ConfigParser(); c.read('config.conf.example'); print('Config example is valid')"
