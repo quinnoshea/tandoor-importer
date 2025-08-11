@@ -78,39 +78,17 @@ def process_url_file(
         importer.log_output("❌ No valid URLs to import!")
         return
 
-    # Get existing recipes for duplicate detection
-    importer.log_output("🔍 File Processor fetching existing recipes for duplicate detection...")
-    existing_urls = importer.get_existing_source_urls()
+    # Use efficient duplicate detection strategy
+    importer.log_output("🔍 Using efficient duplicate detection via Tandoor's scraper...")
+    importer.log_output("📊 All URLs will be processed - duplicates will be detected during scraping")
     
-    # Filter out URLs that already exist (with normalization)
-    new_urls = []
+    # Skip the slow pre-import duplicate checking for now
+    # Tandoor's scraper has built-in duplicate detection that's more reliable
+    new_urls = valid_urls
     pre_existing_count = 0
-    
-    for url in valid_urls:
-        # Normalize the URL for comparison and try to resolve redirects
-        normalized_url = importer._resolve_url_redirects(url)
-        original_normalized = importer._normalize_url_for_comparison(url)
-        
-        # Check if this URL (or its normalized/redirected versions) already exists
-        is_duplicate = False
-        for existing_url in existing_urls:
-            # Compare multiple variations
-            if (normalized_url == existing_url or 
-                original_normalized == existing_url or 
-                url == existing_url):
-                is_duplicate = True
-                break
-        
-        if is_duplicate:
-            pre_existing_count += 1
-            importer.log_output(f"⚠️ Skipping duplicate URL: {url}")
-        else:
-            new_urls.append(url)
 
-    importer.log_output(f"📊 Duplicate analysis: {pre_existing_count} duplicates found, {len(new_urls)} new URLs to import")
-    
     if not new_urls:
-        importer.log_output("✅ All URLs already imported!")
+        importer.log_output("❌ No valid URLs to import!")
         return
 
     importer.log_output(f"🚀 Starting import of {len(new_urls)} new recipes...")

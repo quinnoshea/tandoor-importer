@@ -169,6 +169,41 @@ class BulkImporter:
         
         return url
 
+    def pre_parse_url(self, url: str) -> str:
+        """Pre-parse URL to handle known redirects before sending to Tandoor's duplicate checker"""
+        if not url or not isinstance(url, str):
+            return url
+        
+        original_url = url.strip()
+        
+        # Handle protocol normalization
+        if original_url.startswith('http://'):
+            original_url = original_url.replace('http://', 'https://')
+        
+        # Handle known domain redirects/rebrands that should be pre-processed
+        # This prevents duplicate entries by normalizing URLs to their canonical form
+        redirect_mappings = {
+            'www.kingarthurflour.com': 'www.kingarthurbaking.com',
+            'kingarthurflour.com': 'kingarthurbaking.com',
+            # Add other known redirects as they're discovered
+            # Format: 'old_domain': 'new_canonical_domain'
+            # Examples of other potential redirects:
+            # 'www.olddomainname.com': 'www.newdomainname.com',
+            # 'blog.somesite.com': 'recipes.somesite.com',
+        }
+        
+        parsed_url = original_url.lower()
+        for old_domain, new_domain in redirect_mappings.items():
+            if old_domain in parsed_url:
+                # Replace the old domain with the new one, preserving case for the actual URL
+                original_url = original_url.replace(old_domain, new_domain)
+                original_url = original_url.replace(old_domain.upper(), new_domain)
+                original_url = original_url.replace(old_domain.title(), new_domain)
+                self.log_output(f"   🔄 Pre-parsed URL redirect: {old_domain} → {new_domain}")
+                break
+        
+        return original_url
+
     def get_existing_source_urls(self) -> set:
         """Get all existing recipe source URLs for duplicate detection with robust error handling."""
         existing_urls = set()
@@ -589,8 +624,14 @@ class BulkImporter:
         """Complete import process for a single recipe"""
         self.log_output(f"\n📝 [{index}/{total}] Importing: {url}")
 
-        # Step 1: Scrape
-        scrape_success, scrape_result, images, _ = self.scrape_recipe(url)
+        # Pre-parse URL to handle known redirects
+        parsed_url = self.pre_parse_url(url)
+        if parsed_url != url:
+            self.log_output(f"   🔄 URL pre-parsed from: {url}")
+            self.log_output(f"   🔄 URL pre-parsed to:   {parsed_url}")
+
+        # Step 1: Scrape (use pre-parsed URL)
+        scrape_success, scrape_result, images, _ = self.scrape_recipe(parsed_url)
         if not scrape_success:
             if "rate_limited" in scrape_result:
                 self.stats['rate_limited'] += 1
