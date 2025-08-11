@@ -7,9 +7,8 @@ Contains the main importer class with recipe processing logic.
 import requests
 import time
 from typing import Optional, TextIO, Tuple, Union
-from pathlib import Path
 
-from exceptions import NetworkError, RecipeProcessingError, FileOperationError
+from exceptions import NetworkError, RecipeProcessingError
 from requests.exceptions import (
     RequestException, 
     Timeout, 
@@ -215,7 +214,7 @@ class BulkImporter:
             if match:
                 canonical_url = original_url.replace(match.group(0), match.group(1) + match.group(2)[1:])
                 if canonical_url != original_url:
-                    self.log_output(f"   🔄 Pre-parsed intra-site variation: removing category path")
+                    self.log_output("   🔄 Pre-parsed intra-site variation: removing category path")
                     original_url = canonical_url
         
         # Handle common date-based URL patterns (many sites use /YYYY/MM/DD/ paths)
@@ -226,7 +225,7 @@ class BulkImporter:
             # Remove the date path
             canonical_url = re.sub(date_pattern, '/', original_url)
             if canonical_url != original_url:
-                self.log_output(f"   🔄 Pre-parsed date path removal: /YYYY/MM/DD/ → /")
+                self.log_output("   🔄 Pre-parsed date path removal: /YYYY/MM/DD/ → /")
                 original_url = canonical_url
         
         # Add other site-specific URL normalizations here as needed
@@ -364,12 +363,13 @@ class BulkImporter:
                                 self._normalize_url_for_comparison(existing_source_url) == 
                                 self._normalize_url_for_comparison(source_url)):
                                 return True
-                    except Exception:
+                    except Exception as e:
+                        self.log_output(f"Warning: Error parsing recipe detail during duplicate check: {e}")
                         continue
             
             return False
             
-        except Exception as e:
+        except Exception:
             # Don't log every error to avoid spam
             return False
 
@@ -513,6 +513,7 @@ class BulkImporter:
                                 recipes_fetched += 1
                         except Exception as e:
                             # Don't fail the whole process if one recipe fetch fails
+                            self.log_output(f"Warning: Error fetching recipe during duplicate check: {e}")
                             continue
 
                 # Check timeout again before next page
@@ -564,7 +565,6 @@ class BulkImporter:
             if duplicates:
                 duplicate_recipe = duplicates[0]
                 duplicate_name = duplicate_recipe.get('name', 'Unknown')
-                duplicate_id = duplicate_recipe.get('id')
                 
                 # Check if we can enhance the duplicate with an image
                 enhancement_result = self._try_enhance_duplicate_recipe(duplicate_recipe, result, url)
@@ -669,13 +669,13 @@ class BulkImporter:
             # Ensure name is not too long (Tandoor has field limits)
             if len(recipe_data['name']) > 128:
                 recipe_data['name'] = recipe_data['name'][:125] + "..."
-                self.log_output(f"   ⚠️ Recipe name truncated to 128 characters")
+                self.log_output("   ⚠️ Recipe name truncated to 128 characters")
 
             # Ensure servings is valid
             servings = recipe_data.get('servings')
             if not isinstance(servings, int) or servings <= 0:
                 recipe_data['servings'] = 1
-                self.log_output(f"   ℹ️ Invalid servings value, defaulting to 1")
+                self.log_output("   ℹ️ Invalid servings value, defaulting to 1")
 
             # Fix keyword name field length (Tandoor limit: 64 characters)
             keywords = recipe_data.get('keywords', [])
@@ -758,11 +758,11 @@ class BulkImporter:
             
             success = self._upload_recipe_image(duplicate_id, primary_image_url)
             if success:
-                self.log_output(f"   ✅ Successfully enhanced duplicate recipe with image!")
+                self.log_output("   ✅ Successfully enhanced duplicate recipe with image!")
                 self.stats['duplicates_enhanced'] = self.stats.get('duplicates_enhanced', 0) + 1
                 return True
             else:
-                self.log_output(f"   ⚠️ Failed to enhance duplicate recipe with image")
+                self.log_output("   ⚠️ Failed to enhance duplicate recipe with image")
                 return False
                 
         except Exception as e:
@@ -799,9 +799,9 @@ class BulkImporter:
                     self.log_output(f"   📸 Uploading primary image: {primary_image_url[:60]}{'...' if len(primary_image_url) > 60 else ''}")
                     image_success = self._upload_recipe_image(recipe_id, primary_image_url)
                     if not image_success:
-                        self.log_output(f"   ⚠️ Primary image upload failed")
+                        self.log_output("   ⚠️ Primary image upload failed")
                 else:
-                    self.log_output(f"   ℹ️ No image URL found for upload")
+                    self.log_output("   ℹ️ No image URL found for upload")
                 
                 return True, created_recipe, recipe_id
             else:

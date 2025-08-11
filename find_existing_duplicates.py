@@ -73,7 +73,7 @@ def find_existing_duplicates():
     
     # Find potential duplicates
     duplicates_found = 0
-    print(f"\n🔍 Analyzing for duplicate recipe names...")
+    print("\n🔍 Analyzing for duplicate recipe names...")
     
     for normalized_name, recipes in name_groups.items():
         if len(recipes) > 1:
@@ -86,7 +86,7 @@ def find_existing_duplicates():
             if len(recipes) > 2:
                 print(f"   ⚠️ {len(recipes)} copies found - manual cleanup recommended")
     
-    print(f"\n📊 Summary:")
+    print("\n📊 Summary:")
     print(f"   Total recipe groups: {len(name_groups)}")
     print(f"   Duplicate groups found: {duplicates_found}")
     print(f"   Unique recipes: {len(name_groups) - duplicates_found}")
