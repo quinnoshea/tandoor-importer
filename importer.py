@@ -45,6 +45,7 @@ class BulkImporter:
             'total': 0,
             'successful': 0,
             'duplicates': 0,
+            'duplicates_enhanced': 0,
             'failed_scrape': 0,
             'failed_create': 0,
             'rate_limited': 0,
@@ -246,21 +247,126 @@ class BulkImporter:
                 else:
                     return False, error_msg, None, None
 
-            # Check for duplicates
+            # Check for duplicates and potentially enhance them with images
             duplicates = result.get('duplicates', [])
             if duplicates:
-                return False, f"duplicate: {duplicates[0]['name']}", None, None
+                duplicate_recipe = duplicates[0]
+                duplicate_name = duplicate_recipe.get('name', 'Unknown')
+                duplicate_id = duplicate_recipe.get('id')
+                
+                # Check if we can enhance the duplicate with an image
+                enhancement_result = self._try_enhance_duplicate_recipe(duplicate_recipe, result, url)
+                if enhancement_result:
+                    return False, f"duplicate_enhanced: {duplicate_name}", None, None
+                else:
+                    return False, f"duplicate: {duplicate_name}", None, None
 
             # Get recipe data
             recipe_data = result.get('recipe')
             if not recipe_data:
                 return False, "no_recipe_data", None, None
 
+            # Validate and fix critical fields that cause HTTP 400 errors
+            recipe_data = self._validate_and_fix_recipe_data(recipe_data, url)
+            if not recipe_data:
+                return False, "invalid_recipe_data", None, None
+
             images = result.get('images', [])
             return True, recipe_data, images, None
 
         except Exception as e:
             return False, f"exception: {e}", None, None
+
+    def _validate_and_fix_recipe_data(self, recipe_data: dict, source_url: str) -> dict:
+        """Validate and fix recipe data to prevent HTTP 400 errors"""
+        try:
+            # Fix empty/blank name field - critical for recipe creation
+            name = recipe_data.get('name', '').strip()
+            if not name:
+                # Generate name from URL as fallback
+                from urllib.parse import urlparse
+                parsed_url = urlparse(source_url)
+                path_parts = [p for p in parsed_url.path.split('/') if p and p != 'recipes']
+                if path_parts:
+                    # Use last meaningful part of URL path
+                    name = path_parts[-1].replace('-', ' ').replace('_', ' ').title()
+                    # Remove common suffixes
+                    name = name.replace('.Html', '').replace('.Php', '').replace(' Recipe', '')
+                else:
+                    # Ultimate fallback
+                    name = f"Recipe from {parsed_url.netloc}"
+                
+                recipe_data['name'] = name
+                self.log_output(f"   ⚠️ Empty recipe name detected, using fallback: '{name}'")
+
+            # Ensure name is not too long (Tandoor has field limits)
+            if len(recipe_data['name']) > 128:
+                recipe_data['name'] = recipe_data['name'][:125] + "..."
+                self.log_output(f"   ⚠️ Recipe name truncated to 128 characters")
+
+            # Fix empty description - not critical but good UX
+            if not recipe_data.get('description', '').strip():
+                recipe_data['description'] = f"Recipe imported from {source_url}"
+                self.log_output(f"   ℹ️ Empty description, using URL fallback")
+
+            # Ensure minimum required steps structure
+            if not recipe_data.get('steps') or len(recipe_data.get('steps', [])) == 0:
+                recipe_data['steps'] = [{'instruction': 'See original recipe for instructions', 'ingredients': []}]
+                self.log_output(f"   ⚠️ No recipe steps found, added placeholder step")
+
+            # Ensure servings is valid
+            if not isinstance(recipe_data.get('servings'), int) or recipe_data.get('servings') <= 0:
+                recipe_data['servings'] = 1
+                self.log_output(f"   ℹ️ Invalid servings value, defaulting to 1")
+
+            return recipe_data
+
+        except Exception as e:
+            self.log_output(f"   ❌ Error validating recipe data: {e}")
+            return None
+
+    def _try_enhance_duplicate_recipe(self, duplicate_recipe: dict, scrape_result: dict, source_url: str) -> bool:
+        """Try to enhance existing duplicate recipe with image if it lacks one"""
+        try:
+            duplicate_id = duplicate_recipe.get('id')
+            duplicate_name = duplicate_recipe.get('name', 'Unknown')
+            
+            # Check if duplicate has an image
+            has_image = duplicate_recipe.get('image') and duplicate_recipe.get('image').strip()
+            
+            if has_image:
+                self.log_output(f"   ℹ️ Duplicate recipe '{duplicate_name}' already has image, skipping enhancement")
+                return False
+            
+            # Get potential image sources from scrape result
+            images = scrape_result.get('images', [])
+            recipe_image_url = scrape_result.get('recipe', {}).get('image_url')
+            
+            # Prioritize recipe image_url over images array
+            primary_image_url = recipe_image_url if recipe_image_url and recipe_image_url.strip() else None
+            if not primary_image_url and images:
+                primary_image_url = images[0]
+            
+            if not primary_image_url:
+                self.log_output(f"   ℹ️ No images available to enhance duplicate recipe '{duplicate_name}'")
+                return False
+            
+            # Attempt to add image to existing recipe
+            self.log_output(f"   🎯 Enhancing duplicate recipe '{duplicate_name}' (ID: {duplicate_id}) with image")
+            self.log_output(f"   📸 Adding image: {primary_image_url[:60]}{'...' if len(primary_image_url) > 60 else ''}")
+            
+            success = self._upload_recipe_image(duplicate_id, primary_image_url)
+            if success:
+                self.log_output(f"   ✅ Successfully enhanced duplicate recipe with image!")
+                self.stats['duplicates_enhanced'] = self.stats.get('duplicates_enhanced', 0) + 1
+                return True
+            else:
+                self.log_output(f"   ⚠️ Failed to enhance duplicate recipe with image")
+                return False
+                
+        except Exception as e:
+            self.log_output(f"   ❌ Error enhancing duplicate recipe: {e}")
+            return False
 
     def create_recipe(
         self, 
@@ -341,9 +447,15 @@ class BulkImporter:
                 self.log_output("⏳ Rate limited during scrape")
                 return "rate_limited"
             elif "duplicate" in scrape_result:
-                self.stats['duplicates'] += 1
-                self.log_output(f"⚠️ Duplicate: {scrape_result}")
-                return "duplicate"
+                if "duplicate_enhanced" in scrape_result:
+                    # Duplicate was enhanced with image - count as both duplicate and enhancement
+                    self.stats['duplicates'] += 1
+                    self.log_output(f"✅ Enhanced duplicate: {scrape_result}")
+                    return "duplicate_enhanced"
+                else:
+                    self.stats['duplicates'] += 1
+                    self.log_output(f"⚠️ Duplicate: {scrape_result}")
+                    return "duplicate"
             elif "non_recipe:" in scrape_result:
                 self.stats['non_recipe_urls'] += 1
                 self.failed_urls['non_recipe_urls'].append((url, scrape_result))

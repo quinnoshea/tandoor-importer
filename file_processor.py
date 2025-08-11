@@ -116,7 +116,8 @@ def process_url_file(
             f"📊 Progress: {i}/{len(new_urls)} ({progress_pct:.1f}%) | "
             f"Success rate: {success_rate:.1f}%"
         )
-        importer.log_output(f"📈 Stats: ✅{importer.stats['successful']} ⚠️{importer.stats['duplicates']} "
+        enhanced_str = f"🎯{importer.stats.get('duplicates_enhanced', 0)} " if importer.stats.get('duplicates_enhanced', 0) > 0 else ""
+        importer.log_output(f"📈 Stats: ✅{importer.stats['successful']} ⚠️{importer.stats['duplicates']} " + enhanced_str +
               f"🚫{importer.stats['non_recipe_urls']} 🌐{importer.stats['connection_errors']} "
               f"❌{importer.stats['failed_scrape']+importer.stats['failed_create']} ⏳{importer.stats['rate_limited']}")
 
@@ -137,6 +138,8 @@ def _print_final_report(importer: BulkImporter, new_urls: list) -> None:
     importer.log_output(f"   Total processed: {importer.stats['total']}")
     importer.log_output(f"   ✅ Successful imports: {importer.stats['successful']}")
     importer.log_output(f"   ⚠️ Duplicates skipped: {importer.stats['duplicates']}")
+    if importer.stats.get('duplicates_enhanced', 0) > 0:
+        importer.log_output(f"   🎯 Duplicates enhanced with images: {importer.stats['duplicates_enhanced']}")
     importer.log_output(f"   ❌ Failed scraping: {importer.stats['failed_scrape']}")
     importer.log_output(f"   ❌ Failed creation: {importer.stats['failed_create']}")
     importer.log_output(f"   🚫 Non-recipe URLs: {importer.stats['non_recipe_urls']}")
