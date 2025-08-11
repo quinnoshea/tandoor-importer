@@ -78,13 +78,47 @@ def process_url_file(
         importer.log_output("❌ No valid URLs to import!")
         return
 
-    # Modified duplicate detection: Let Tandoor's scraper handle duplicates and image enhancement
-    # The pre-filtering was too aggressive and prevented image enhancement opportunities
-    importer.log_output("🎯 Using Tandoor's intelligent duplicate detection and image enhancement")
+    # Intelligent redirect-aware duplicate detection
+    importer.log_output("🔍 Using redirect-aware duplicate detection for optimal image enhancement")
     
-    # Process all valid URLs - let Tandoor's scraper decide on duplicates and enhancements
-    new_urls = valid_urls
+    # Get existing recipes for smart duplicate detection
+    existing_urls = importer.get_existing_source_urls()
+    
+    # Smart filtering: resolve redirects and check for duplicates
+    new_urls = []
     pre_existing_count = 0
+    redirect_resolved_count = 0
+    
+    for url in valid_urls:
+        original_url = url.strip()
+        
+        # Resolve redirects to get the final destination URL
+        resolved_url = importer._resolve_url_redirects(original_url)
+        if resolved_url != importer._normalize_url_for_comparison(original_url):
+            redirect_resolved_count += 1
+        
+        # Check if either original, normalized, or resolved URL exists
+        normalized_url = importer._normalize_url_for_comparison(original_url)
+        
+        url_exists = (
+            original_url in existing_urls or 
+            normalized_url in existing_urls or 
+            resolved_url in existing_urls
+        )
+        
+        if not url_exists:
+            new_urls.append(url)
+        else:
+            pre_existing_count += 1
+            importer.stats['duplicates'] += 1
+    
+    if redirect_resolved_count > 0:
+        importer.log_output(f"🔄 Resolved {redirect_resolved_count} URL redirects for better duplicate detection")
+    
+    if pre_existing_count > 0:
+        importer.log_output(f"⚠️ Skipping {pre_existing_count} URLs that resolve to existing recipes (including redirects)")
+    else:
+        pre_existing_count = 0
 
     if not new_urls:
         importer.log_output("✅ All URLs already imported!")

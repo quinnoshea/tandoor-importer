@@ -128,6 +128,20 @@ class BulkImporter:
         # Better to attempt and fail gracefully than to over-filter
         return True
 
+    def _resolve_url_redirects(self, url: str) -> str:
+        """Resolve URL redirects to get the final destination URL"""
+        try:
+            import requests
+            # Follow redirects to get final URL, similar to what Tandoor's scraper does
+            response = requests.head(url, allow_redirects=True, timeout=10)
+            final_url = response.url
+            
+            # Apply our normalization to the final URL
+            return self._normalize_url_for_comparison(final_url)
+        except Exception:
+            # If redirect resolution fails, fall back to normalization
+            return self._normalize_url_for_comparison(url)
+
     def _normalize_url_for_comparison(self, url: str) -> str:
         """Normalize URL to handle common redirect patterns for better duplicate detection"""
         if not url or not isinstance(url, str):
