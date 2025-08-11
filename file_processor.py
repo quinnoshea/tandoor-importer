@@ -116,7 +116,8 @@ def process_url_file(
             f"Success rate: {success_rate:.1f}%"
         )
         enhanced_str = f"🎯{importer.stats.get('duplicates_enhanced', 0)} " if importer.stats.get('duplicates_enhanced', 0) > 0 else ""
-        importer.log_output(f"📈 Stats: ✅{importer.stats['successful']} ⚠️{importer.stats['duplicates']} " + enhanced_str +
+        name_dup_str = f"🔄{importer.stats.get('name_duplicates', 0)} " if importer.stats.get('name_duplicates', 0) > 0 else ""
+        importer.log_output(f"📈 Stats: ✅{importer.stats['successful']} ⚠️{importer.stats['duplicates']} " + enhanced_str + name_dup_str +
               f"🚫{importer.stats['non_recipe_urls']} 🌐{importer.stats['connection_errors']} "
               f"❌{importer.stats['failed_scrape']+importer.stats['failed_create']} ⏳{importer.stats['rate_limited']}")
 
@@ -139,6 +140,8 @@ def _print_final_report(importer: BulkImporter, new_urls: list) -> None:
     importer.log_output(f"   ⚠️ Duplicates skipped: {importer.stats['duplicates']}")
     if importer.stats.get('duplicates_enhanced', 0) > 0:
         importer.log_output(f"   🎯 Duplicates enhanced with images: {importer.stats['duplicates_enhanced']}")
+    if importer.stats.get('name_duplicates', 0) > 0:
+        importer.log_output(f"   🔄 Name-based duplicates skipped: {importer.stats['name_duplicates']}")
     importer.log_output(f"   ❌ Failed scraping: {importer.stats['failed_scrape']}")
     importer.log_output(f"   ❌ Failed creation: {importer.stats['failed_create']}")
     importer.log_output(f"   🚫 Non-recipe URLs: {importer.stats['non_recipe_urls']}")
@@ -151,8 +154,8 @@ def _print_final_report(importer: BulkImporter, new_urls: list) -> None:
 
     # Display failed URLs if any
     failure_types = ['failed_scrape', 'failed_create', 'non_recipe_urls', 
-                    'connection_errors', 'invalid_urls']
-    total_failures = sum(importer.stats[failure_type] for failure_type in failure_types)
+                    'connection_errors', 'invalid_urls', 'name_duplicates']
+    total_failures = sum(importer.stats.get(failure_type, 0) for failure_type in failure_types)
 
     if total_failures > 0:
         importer.log_output(f"\n❌ FAILED URLS ({total_failures} total):")
@@ -180,6 +183,12 @@ def _print_final_report(importer: BulkImporter, new_urls: list) -> None:
         if importer.failed_urls['failed_create']:
             importer.log_output(f"\n❌ Failed creation ({len(importer.failed_urls['failed_create'])}):")
             for url, reason in importer.failed_urls['failed_create']:
+                importer.log_output(f"   {url} - {reason}")
+        
+        if importer.failed_urls.get('name_duplicates'):
+            importer.log_output(f"\n🔄 Name-based duplicates ({len(importer.failed_urls['name_duplicates'])}):")
+            importer.log_output("   URLs skipped due to 100% name match, please manually import if necessary:")
+            for url, reason in importer.failed_urls['name_duplicates']:
                 importer.log_output(f"   {url} - {reason}")
     else:
         importer.log_output("\n✅ No failed URLs!")

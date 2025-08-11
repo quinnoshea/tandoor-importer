@@ -45,6 +45,7 @@ class BulkImporter:
             'successful': 0,
             'duplicates': 0,
             'duplicates_enhanced': 0,
+            'name_duplicates': 0,
             'failed_scrape': 0,
             'failed_create': 0,
             'rate_limited': 0,
@@ -59,7 +60,8 @@ class BulkImporter:
             'failed_create': [],
             'non_recipe_urls': [],
             'connection_errors': [],
-            'invalid_urls': []
+            'invalid_urls': [],
+            'name_duplicates': []
         }
 
     def log_output(self, message: str) -> None:
@@ -235,6 +237,71 @@ class BulkImporter:
         #     pass
         
         return original_url
+
+    def _normalize_recipe_name(self, name: str) -> str:
+        """Normalize recipe name for duplicate comparison"""
+        if not name or not isinstance(name, str):
+            return ""
+        
+        import re
+        
+        # Convert to lowercase
+        normalized = name.lower()
+        
+        # Remove common punctuation and special characters
+        normalized = re.sub(r'[^\w\s]', ' ', normalized)
+        
+        # Replace multiple whitespace with single space
+        normalized = re.sub(r'\s+', ' ', normalized)
+        
+        # Very conservative normalization - only basic cleanup
+        # Don't remove any words that could be meaningful recipe differentiators
+        # The goal is to catch exact duplicates, not similar recipes
+        
+        # Final cleanup
+        normalized = normalized.strip()
+        
+        return normalized
+
+    def _check_name_duplicate(self, recipe_name: str) -> Tuple[bool, str, Optional[dict]]:
+        """Check if a recipe with the same normalized name already exists"""
+        if not recipe_name:
+            return False, "", None
+        
+        normalized_name = self._normalize_recipe_name(recipe_name)
+        if not normalized_name:
+            return False, "", None
+        
+        try:
+            # Search for recipes with similar names
+            search_url = f"{self.tandoor_url}/api/recipe/"
+            params = {
+                'query': normalized_name,
+                'page_size': 50  # Limit results to avoid performance issues
+            }
+            
+            response = self.session.get(search_url, params=params, timeout=15)
+            if response.status_code != 200:
+                return False, "", None
+            
+            data = response.json()
+            results = data.get('results', [])
+            
+            for recipe in results:
+                existing_name = recipe.get('name', '')
+                existing_normalized = self._normalize_recipe_name(existing_name)
+                
+                # Check for exact normalized name match
+                if existing_normalized == normalized_name:
+                    recipe_id = recipe.get('id', 'Unknown')
+                    return True, f"Name match found: '{existing_name}' (ID: {recipe_id})", recipe
+            
+            return False, "", None
+            
+        except Exception as e:
+            # Don't fail the import if name check fails
+            self.log_output(f"   ⚠️ Name duplicate check failed: {e}")
+            return False, "", None
 
     def _is_url_duplicate(self, url: str, existing_urls: set) -> bool:
         """Check if URL is a duplicate, considering variations and normalizations"""
@@ -892,6 +959,32 @@ class BulkImporter:
             
         recipe_data = scrape_result
         recipe_name = recipe_data.get('name', 'Unknown')
+
+        # Additional name-based duplicate check
+        self.log_output(f"   🔍 Checking for name-based duplicates: '{recipe_name}'")
+        is_name_duplicate, name_match_info, duplicate_recipe = self._check_name_duplicate(recipe_name)
+        
+        if is_name_duplicate:
+            # Try to enhance the name-based duplicate with an image (like URL duplicates)
+            if duplicate_recipe:
+                # Create a mock result structure similar to what Tandoor returns
+                mock_result = {
+                    'recipe': recipe_data,
+                    'images': images or []
+                }
+                enhancement_result = self._try_enhance_duplicate_recipe(duplicate_recipe, mock_result, url)
+                if enhancement_result:
+                    self.stats['name_duplicates'] += 1
+                    self.stats['duplicates_enhanced'] = self.stats.get('duplicates_enhanced', 0) + 1
+                    self.failed_urls['name_duplicates'].append((url, f"Name duplicate enhanced: {name_match_info}"))
+                    self.log_output(f"   ✅ Enhanced name-based duplicate with image: {name_match_info}")
+                    return "name_duplicate_enhanced"
+            
+            # No image enhancement possible or failed
+            self.stats['name_duplicates'] += 1
+            self.failed_urls['name_duplicates'].append((url, f"Name duplicate: {name_match_info}"))
+            self.log_output(f"   🔄 Skipping - {name_match_info}")
+            return "name_duplicate"
 
         # Step 2: Create
         # Ensure source_url is set to the pre-parsed URL for consistent duplicate detection
