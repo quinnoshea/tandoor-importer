@@ -202,18 +202,224 @@ class BulkImporter:
                 self.log_output(f"   🔄 Pre-parsed URL redirect: {old_domain} → {new_domain}")
                 break
         
+        # Handle intra-site URL variations where the same recipe exists at multiple paths
+        # This prevents duplicate entries when sites organize recipes in multiple categories
+        
+        # ChiliPepperMadness.com - same recipe in multiple categories (marinades, hot-sauces, etc.)
+        if 'chilipeppermadness.com' in parsed_url and '/chili-pepper-recipes/' in parsed_url:
+            import re
+            # Pattern to match: /chili-pepper-recipes/[category]/recipe-name/
+            # Normalize to: /chili-pepper-recipes/recipe-name/
+            pattern = r'(/chili-pepper-recipes/)[^/]+(/[^/]+/)$'
+            match = re.search(pattern, original_url)
+            if match:
+                canonical_url = original_url.replace(match.group(0), match.group(1) + match.group(2)[1:])
+                if canonical_url != original_url:
+                    self.log_output(f"   🔄 Pre-parsed intra-site variation: removing category path")
+                    original_url = canonical_url
+        
+        # Handle common date-based URL patterns (many sites use /YYYY/MM/DD/ paths)
+        # Remove date paths like /2012/08/01/ to match how many scrapers normalize URLs
+        import re
+        date_pattern = r'/\d{4}/\d{2}/\d{2}/'
+        if re.search(date_pattern, original_url):
+            # Remove the date path
+            canonical_url = re.sub(date_pattern, '/', original_url)
+            if canonical_url != original_url:
+                self.log_output(f"   🔄 Pre-parsed date path removal: /YYYY/MM/DD/ → /")
+                original_url = canonical_url
+        
+        # Add other site-specific URL normalizations here as needed
+        # Example pattern:
+        # if 'othersite.com' in parsed_url:
+        #     # Normalize othersite.com URL variations
+        #     pass
+        
         return original_url
 
-    def get_existing_source_urls(self) -> set:
-        """Get all existing recipe source URLs for duplicate detection with robust error handling."""
+    def _is_url_duplicate(self, url: str, existing_urls: set) -> bool:
+        """Check if URL is a duplicate, considering variations and normalizations"""
+        if not existing_urls:
+            return False
+        
+        # Check exact match first
+        if url in existing_urls:
+            return True
+        
+        # Check normalized version
+        normalized_url = self._normalize_url_for_comparison(url)
+        if normalized_url in existing_urls:
+            return True
+        
+        # Check pre-parsed version (for redirects like King Arthur)
+        pre_parsed_url = self.pre_parse_url(url)
+        if pre_parsed_url in existing_urls:
+            return True
+        
+        # Check normalized version of pre-parsed URL
+        normalized_pre_parsed = self._normalize_url_for_comparison(pre_parsed_url)
+        if normalized_pre_parsed in existing_urls:
+            return True
+        
+        # CRITICAL: Check if the pre-parsed URL (where we'll actually send the request)
+        # would result in the same final URL as any existing recipe
+        # This handles cases like HTTP vs HTTPS variants of redirecting URLs
+        for existing_url in existing_urls:
+            # If an existing URL is from the same domain as our pre-parsed URL,
+            # and they normalize to the same thing, consider it a duplicate
+            if (self._normalize_url_for_comparison(existing_url) == normalized_pre_parsed or
+                existing_url == pre_parsed_url):
+                return True
+        
+        # For chilipeppermadness.com URLs, check both with and without category paths
+        if 'chilipeppermadness.com' in url.lower() and '/chili-pepper-recipes/' in url:
+            import re
+            
+            # If this URL has a category, check if version without category exists
+            pattern = r'(/chili-pepper-recipes/)[^/]+(/[^/]+/)$'
+            match = re.search(pattern, url)
+            if match:
+                canonical_url = url.replace(match.group(0), match.group(1) + match.group(2)[1:])
+                if canonical_url in existing_urls:
+                    return True
+            
+            # Also check if any existing URL is a category variation of this URL
+            url_lower = url.lower()
+            for existing_url in existing_urls:
+                if 'chilipeppermadness.com' in existing_url.lower():
+                    # Extract recipe name from both URLs and compare
+                    url_recipe_name = url_lower.split('/')[-2] if url_lower.endswith('/') else url_lower.split('/')[-1]
+                    existing_recipe_name = existing_url.lower().split('/')[-2] if existing_url.lower().endswith('/') else existing_url.lower().split('/')[-1]
+                    
+                    # If recipe names match, consider it a duplicate
+                    if url_recipe_name == existing_recipe_name and len(url_recipe_name) > 5:
+                        return True
+        
+        return False
+
+    def _try_enhance_duplicate_from_url(self, url: str, existing_urls: set) -> bool:
+        """Try to enhance an existing duplicate recipe with an image from the given URL"""
+        try:
+            # For now, let's use a simpler approach - just try to scrape and see if 
+            # Tandoor finds a duplicate that needs enhancement
+            self.log_output(f"   🔍 Checking if '{url}' can enhance existing recipe...")
+            
+            scrape_success, scrape_result, images, _ = self.scrape_recipe(url)
+            if not scrape_success:
+                return False
+                
+            # If scraping found duplicates, check if we enhanced any
+            if isinstance(scrape_result, str) and "duplicate_enhanced" in scrape_result:
+                return True
+            elif isinstance(scrape_result, str) and "duplicate:" in scrape_result:
+                # It's a duplicate but didn't get enhanced (already has image)
+                return False
+                
+            return False
+            
+        except Exception as e:
+            self.log_output(f"   ❌ Error during image enhancement check: {e}")
+            return False
+
+    def _urls_represent_same_recipe(self, url1: str, url2: str) -> bool:
+        """Check if two URLs represent the same recipe (for chilipeppermadness.com variations)"""
+        if 'chilipeppermadness.com' in url1.lower() and 'chilipeppermadness.com' in url2.lower():
+            # Extract recipe names and compare
+            name1 = url1.lower().split('/')[-2] if url1.lower().endswith('/') else url1.lower().split('/')[-1]
+            name2 = url2.lower().split('/')[-2] if url2.lower().endswith('/') else url2.lower().split('/')[-1]
+            return name1 == name2 and len(name1) > 5
+        return False
+
+    def _check_recipe_exists_by_source_url(self, source_url: str) -> bool:
+        """Check if a recipe with the given source URL already exists (optimized for speed)"""
+        try:
+            # Quick check: only look at recent recipes to avoid timeout
+            response = self.session.get(
+                f"{self.tandoor_url}/api/recipe/",
+                params={'page_size': 20},  # Reduced to prevent timeouts
+                timeout=5
+            )
+            
+            if response.status_code != 200:
+                return False
+                
+            data = response.json()
+            recipes = data.get('results', [])
+            
+            # Check each recipe's source URL by fetching details
+            for recipe in recipes:
+                recipe_id = recipe.get('id')
+                if recipe_id:
+                    try:
+                        detail_response = self.session.get(
+                            f"{self.tandoor_url}/api/recipe/{recipe_id}/",
+                            timeout=3  # Shorter timeout
+                        )
+                        if detail_response.status_code == 200:
+                            detail = detail_response.json()
+                            existing_source_url = detail.get('source_url', '')
+                            
+                            # Check for exact match or normalized match
+                            if (existing_source_url == source_url or
+                                self._normalize_url_for_comparison(existing_source_url) == 
+                                self._normalize_url_for_comparison(source_url)):
+                                return True
+                    except Exception:
+                        continue
+            
+            return False
+            
+        except Exception as e:
+            # Don't log every error to avoid spam
+            return False
+
+    def _check_recipe_exists_with_url_variations(self, original_url: str, parsed_url: str) -> bool:
+        """Check if a recipe exists considering URL variations (ChiliPepperMadness categories, etc.)"""
+        try:
+            # For ChiliPepperMadness URLs, we need to check for category variations
+            if 'chilipeppermadness.com' in original_url.lower() and '/chili-pepper-recipes/' in original_url:
+                import re
+                
+                # Extract the recipe name from the URL
+                pattern = r'/chili-pepper-recipes/(?:[^/]+/)?([^/]+)/?$'
+                match = re.search(pattern, original_url)
+                if match:
+                    recipe_name = match.group(1)
+                    
+                    # Search for existing recipes with this recipe name in any category
+                    # Check common variations: hot-sauces, marinades, condiments, etc.
+                    variations = [
+                        f"https://www.chilipeppermadness.com/chili-pepper-recipes/{recipe_name}/",
+                        f"https://www.chilipeppermadness.com/chili-pepper-recipes/hot-sauces/{recipe_name}/",
+                        f"https://www.chilipeppermadness.com/chili-pepper-recipes/marinades/{recipe_name}/",
+                        f"https://www.chilipeppermadness.com/chili-pepper-recipes/condiments/{recipe_name}/",
+                        f"https://www.chilipeppermadness.com/chili-pepper-recipes/sauces/{recipe_name}/"
+                    ]
+                    
+                    for variation in variations:
+                        if self._check_recipe_exists_by_source_url(variation):
+                            self.log_output(f"   🔄 Found existing recipe with URL variation: {variation}")
+                            return True
+            
+            # Also check the exact parsed URL
+            return self._check_recipe_exists_by_source_url(parsed_url)
+            
+        except Exception as e:
+            self.log_output(f"   ⚠️ Error checking URL variations: {e}")
+            return False
+
+    def get_existing_source_urls(self, max_recipes: int = 500, timeout_seconds: int = 30) -> set:
+        """Get existing recipe source URLs for duplicate detection with limits to prevent timeouts."""
         existing_urls = set()
         page = 1
-        max_retries = 3
+        max_retries = 2  # Reduced retries for faster operation
         base_delay = 1
+        recipes_fetched = 0
+        start_time = __import__('time').time()
 
-        self.log_output("🔍 Importer fetching existing recipes for duplicate detection...")
+        self.log_output(f"🔍 Fetching up to {max_recipes} existing recipes (timeout: {timeout_seconds}s)...")
 
-        while True:
+        while recipes_fetched < max_recipes:
             response = None
             retry_count = 0
             
@@ -280,13 +486,19 @@ class BulkImporter:
                 for recipe in results:
                     if not isinstance(recipe, dict):
                         continue
+                    
+                    # Check timeout
+                    if __import__('time').time() - start_time > timeout_seconds:
+                        self.log_output(f"   ⏱️ Timeout reached after {timeout_seconds}s, stopping fetch")
+                        break
+                        
                     recipe_id = recipe.get('id')
-                    if recipe_id:
+                    if recipe_id and recipes_fetched < max_recipes:
                         # Get detailed recipe data to access source_url field
                         try:
                             detail_response = self.session.get(
                                 f"{self.tandoor_url}/api/recipe/{recipe_id}/",
-                                timeout=10
+                                timeout=5  # Shorter timeout for individual requests
                             )
                             if detail_response.status_code == 200:
                                 detail_data = detail_response.json()
@@ -298,21 +510,25 @@ class BulkImporter:
                                     existing_urls.add(original_url)
                                     if normalized_url != original_url:
                                         existing_urls.add(normalized_url)
+                                recipes_fetched += 1
                         except Exception as e:
                             # Don't fail the whole process if one recipe fetch fails
-                            self.log_output(f"   ⚠️ Could not fetch details for recipe {recipe_id}: {e}")
                             continue
 
-                if not data.get('next'):
+                # Check timeout again before next page
+                if __import__('time').time() - start_time > timeout_seconds:
+                    break
+                    
+                if not data.get('next') or recipes_fetched >= max_recipes:
                     break
 
                 page += 1
-                time.sleep(1)  # Small delay between pagination requests
 
             except (ValueError, KeyError) as e:
                 raise RecipeProcessingError(f"Invalid response format from Tandoor: {e}")
 
-        self.log_output(f"📊 Found {len(existing_urls)} existing recipes with source URLs")
+        elapsed_time = __import__('time').time() - start_time
+        self.log_output(f"📊 Fetched {recipes_fetched} recipes in {elapsed_time:.1f}s, found {len(existing_urls)} source URLs")
         return existing_urls
 
     def scrape_recipe(self, url: str) -> Tuple[bool, Union[str, dict], Optional[list], None]:
@@ -630,7 +846,11 @@ class BulkImporter:
             self.log_output(f"   🔄 URL pre-parsed from: {url}")
             self.log_output(f"   🔄 URL pre-parsed to:   {parsed_url}")
 
-        # Step 1: Scrape (use pre-parsed URL)
+        # Enhanced pre-import duplicate check for URL variations
+        # SIMPLIFIED: Only check for recent duplicates to avoid performance issues
+        # Rely primarily on Tandoor's duplicate detection with proper URL normalization
+
+        # Step 1: Scrape (use pre-parsed URL for redirects)
         scrape_success, scrape_result, images, _ = self.scrape_recipe(parsed_url)
         if not scrape_success:
             if "rate_limited" in scrape_result:
@@ -674,9 +894,10 @@ class BulkImporter:
         recipe_name = recipe_data.get('name', 'Unknown')
 
         # Step 2: Create
-        # Ensure source_url is set to the original URL we're importing from
+        # Ensure source_url is set to the pre-parsed URL for consistent duplicate detection
+        # This ensures that HTTP/HTTPS and redirect variants all normalize to the same source_url
         if 'source_url' not in recipe_data or not recipe_data['source_url']:
-            recipe_data['source_url'] = url
+            recipe_data['source_url'] = parsed_url
         
         create_success, create_result, recipe_id = self.create_recipe(recipe_data, images)
         if not create_success:

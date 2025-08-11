@@ -78,14 +78,13 @@ def process_url_file(
         importer.log_output("❌ No valid URLs to import!")
         return
 
-    # Use efficient duplicate detection strategy
-    importer.log_output("🔍 Using efficient duplicate detection via Tandoor's scraper...")
-    importer.log_output("📊 All URLs will be processed - duplicates will be detected during scraping")
+    # Use reliable Tandoor-based duplicate detection
+    importer.log_output("🔍 Using Tandoor's built-in duplicate detection...")
+    importer.log_output("📊 All URLs will be processed - duplicates detected during scraping with enhanced URL pre-parsing")
     
-    # Skip the slow pre-import duplicate checking for now
-    # Tandoor's scraper has built-in duplicate detection that's more reliable
+    # Skip pre-import duplicate checking - it's unreliable for large databases
+    # Instead rely on proper URL pre-parsing + Tandoor's duplicate detection
     new_urls = valid_urls
-    pre_existing_count = 0
 
     if not new_urls:
         importer.log_output("❌ No valid URLs to import!")
